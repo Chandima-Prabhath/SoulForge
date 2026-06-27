@@ -60,24 +60,23 @@ export interface MatchArena {
 }
 
 /**
- * Build a diamond-shaped MOBA arena with 3 lanes.
+ * Build a MOBA arena rotated 90° CCW from the diagonal layout.
  *
- * The map is 44x44 tiles. Player base is at bottom-left, enemy base
- * is at top-right. The diamond is formed by the playable area inside
- * the border walls.
- *
- * Lanes:
- *   - MID: straight diagonal from bottom-left to top-right (main diagonal)
- *   - TOP: goes from player base → up the left edge → across the top → to enemy base
- *   - BOTTOM: goes from player base → across the bottom → up the right edge → to enemy base
+ * After rotation:
+ *   - Player core: bottom-CENTER
+ *   - Enemy core: top-CENTER
+ *   - MID lane: vertical, straight up the middle (col = W/2)
+ *   - TOP lane: goes from player base → up the LEFT edge → to enemy base
+ *   - BOTTOM lane: goes from player base → up the RIGHT edge → to enemy base
+ *   - Territory: bottom half = player (blue), top half = enemy (red)
+ *   - Jungle: horizontal band in the middle
  */
 export function buildMatchArena(): MatchArena {
   const W = 44;
   const H = 44;
   const tiles = new Array(W * H).fill(0);
 
-  // Border walls (creates a square boundary, the diamond shape comes
-  // from the lane layout + territory coloring inside)
+  // Border walls
   for (let i = 0; i < W; i++) {
     tiles[0 * W + i] = 2;
     tiles[(H - 1) * W + i] = 2;
@@ -85,123 +84,89 @@ export function buildMatchArena(): MatchArena {
     tiles[i * W + (W - 1)] = 2;
   }
 
-  // ── Territory: diagonal split ──────────────────────────────────────
-  // Bottom-left triangle = player (blue), Top-right triangle = enemy (red)
-  // The split line is the anti-diagonal: r + c = W
+  const midCol = Math.floor(W / 2);
+  const jungleStart = Math.floor(H * 0.4);
+  const jungleEnd = Math.floor(H * 0.6);
+
+  // ── Territory: bottom = player (blue), top = enemy (red) ───────────
   for (let r = 1; r < H - 1; r++) {
     for (let c = 1; c < W - 1; c++) {
-      const distFromDiagonal = (r + c) - W;
-      if (distFromDiagonal < -4) {
+      if (r > jungleEnd) {
         tiles[r * W + c] = 5; // player territory (blue)
-      } else if (distFromDiagonal > 4) {
+      } else if (r < jungleStart) {
         tiles[r * W + c] = 6; // enemy territory (red)
       }
-      // |distFromDiagonal| <= 4 → neutral jungle band along the diagonal
+      // Middle band (jungleStart..jungleEnd) stays neutral (0)
     }
   }
 
-  // ── MID LANE: main diagonal from bottom-left (3, H-4) to top-right (W-4, 3) ─
-  // In isometric, the "diagonal" of the grid goes from bottom-left to top-right.
-  // We make a 3-tile-wide path along col + row = constant (roughly W).
-  for (let r = 3; r < H - 3; r++) {
-    // The mid-lane column for this row: c = W - r (anti-diagonal)
-    // But we want it to go from (3, H-4) to (W-4, 3), so c = W - 1 - r + offset
-    const midC = W - 1 - r;
-    for (let dx = -1; dx <= 1; dx++) {
-      const c = midC + dx;
-      if (c > 1 && c < W - 2 && r > 1 && r < H - 2) {
-        if (r + c < W - 4) {
-          tiles[r * W + c] = 7; // player lane (blue)
-        } else if (r + c > W + 4) {
-          tiles[r * W + c] = 8; // enemy lane (red)
-        } else {
-          tiles[r * W + c] = 1; // neutral mid lane
-        }
-      }
+  // Helper: set a tile to lane color based on territory
+  const setLaneTile = (c: number, r: number) => {
+    if (c < 1 || c >= W - 1 || r < 1 || r >= H - 1) return;
+    if (r > jungleEnd) {
+      tiles[r * W + c] = 7; // player lane (blue)
+    } else if (r < jungleStart) {
+      tiles[r * W + c] = 8; // enemy lane (red)
+    } else {
+      tiles[r * W + c] = 1; // neutral lane
     }
+  };
+
+  // ── MID LANE: vertical, straight up the middle (col = midCol) ──────
+  for (let r = 2; r < H - 2; r++) {
+    setLaneTile(midCol - 1, r);
+    setLaneTile(midCol, r);
+    setLaneTile(midCol + 1, r);
   }
 
-  // ── TOP LANE: along the left + top edges ───────────────────────────
-  // Goes from player core (bottom-left) → up the LEFT edge → across the TOP → to enemy core (top-right)
-  // Left edge segment (going up): col ~5, rows from H-6 to 5
-  const topLaneLeftCol = 5;
-  for (let r = H - 6; r >= 5; r--) {
-    for (let dx = 0; dx < 2; dx++) {
-      const c = topLaneLeftCol + dx;
-      if (c > 1 && c < W - 2) {
-        if (r + c < W - 4) {
-          tiles[r * W + c] = 7; // player side
-        } else if (r + c > W + 4) {
-          tiles[r * W + c] = 8; // enemy side
-        } else {
-          tiles[r * W + c] = 1; // neutral
-        }
-      }
-    }
+  // ── TOP LANE: goes up the LEFT edge ────────────────────────────────
+  // Player core (bottom-center) → left → up the left edge → right to enemy core (top-center)
+  const topLaneCol = 5;
+  // Horizontal segment at bottom (from midCol to topLaneCol)
+  for (let c = topLaneCol; c <= midCol; c++) {
+    setLaneTile(c, H - 5);
+    setLaneTile(c, H - 6);
   }
-  // Top edge segment (going right): row ~5, cols from 5 to W-6
-  const topLaneTopRow = 5;
-  for (let c = 5; c <= W - 6; c++) {
-    for (let dy = 0; dy < 2; dy++) {
-      const r = topLaneTopRow + dy;
-      if (r > 1 && r < H - 2) {
-        if (r + c < W - 4) {
-          tiles[r * W + c] = 7;
-        } else if (r + c > W + 4) {
-          tiles[r * W + c] = 8;
-        } else {
-          tiles[r * W + c] = 1;
-        }
-      }
-    }
+  // Vertical segment (going up the left side)
+  for (let r = 5; r < H - 5; r++) {
+    setLaneTile(topLaneCol, r);
+    setLaneTile(topLaneCol + 1, r);
+  }
+  // Horizontal segment at top (from topLaneCol to midCol)
+  for (let c = topLaneCol; c <= midCol; c++) {
+    setLaneTile(c, 5);
+    setLaneTile(c, 4);
   }
 
-  // ── BOTTOM LANE: along the bottom + right edges ────────────────────
-  // Goes from player core (bottom-left) → across the BOTTOM → up the RIGHT edge → to enemy core (top-right)
-  // Bottom edge segment (going right): row ~H-6, cols from 5 to W-6
-  const botLaneBotRow = H - 6;
-  for (let c = 5; c <= W - 6; c++) {
-    for (let dy = 0; dy < 2; dy++) {
-      const r = botLaneBotRow + dy;
-      if (r > 1 && r < H - 2) {
-        if (r + c < W - 4) {
-          tiles[r * W + c] = 7;
-        } else if (r + c > W + 4) {
-          tiles[r * W + c] = 8;
-        } else {
-          tiles[r * W + c] = 1;
-        }
-      }
-    }
+  // ── BOTTOM LANE: goes up the RIGHT edge ────────────────────────────
+  // Player core (bottom-center) → right → up the right edge → left to enemy core (top-center)
+  const botLaneCol = W - 6;
+  // Horizontal segment at bottom (from midCol to botLaneCol)
+  for (let c = midCol; c <= botLaneCol; c++) {
+    setLaneTile(c, H - 5);
+    setLaneTile(c, H - 6);
   }
-  // Right edge segment (going up): col ~W-6, rows from H-6 to 5
-  const botLaneRightCol = W - 6;
-  for (let r = H - 6; r >= 5; r--) {
-    for (let dx = 0; dx < 2; dx++) {
-      const c = botLaneRightCol + dx;
-      if (c > 1 && c < W - 2) {
-        if (r + c < W - 4) {
-          tiles[r * W + c] = 7;
-        } else if (r + c > W + 4) {
-          tiles[r * W + c] = 8;
-        } else {
-          tiles[r * W + c] = 1;
-        }
-      }
-    }
+  // Vertical segment (going up the right side)
+  for (let r = 5; r < H - 5; r++) {
+    setLaneTile(botLaneCol, r);
+    setLaneTile(botLaneCol + 1, r);
+  }
+  // Horizontal segment at top (from midCol to botLaneCol)
+  for (let c = midCol; c <= botLaneCol; c++) {
+    setLaneTile(c, 5);
+    setLaneTile(c, 4);
   }
 
-  // ── Jungle: water + rocks in the neutral band between lanes ────────
-  // Water patches in the jungle areas (between mid and top/bottom lanes)
+  // ── Jungle: water + rocks in the middle band ───────────────────────
   const waterPatches: Array<[number, number]> = [
-    // Between mid and top lane (left side)
-    [10, 14], [11, 14], [10, 15],
-    [14, 10], [14, 11], [15, 10],
-    // Between mid and bottom lane (right side)
-    [W-12, H-15], [W-11, H-15], [W-12, H-14],
-    [W-15, H-12], [W-15, H-11], [W-14, H-12],
-    // Center jungle
-    [Math.floor(W/2)-2, Math.floor(H/2)+2], [Math.floor(W/2)-1, Math.floor(H/2)+2],
+    // Left jungle (between mid and top lane)
+    [10, Math.floor(H/2) - 1], [11, Math.floor(H/2) - 1], [10, Math.floor(H/2)],
+    [12, Math.floor(H/2) + 1], [13, Math.floor(H/2) + 1],
+    // Right jungle (between mid and bottom lane)
+    [W-11, Math.floor(H/2) - 1], [W-12, Math.floor(H/2) - 1], [W-11, Math.floor(H/2)],
+    [W-13, Math.floor(H/2) + 1], [W-14, Math.floor(H/2) + 1],
+    // Center jungle (near mid lane sides)
+    [midCol - 6, Math.floor(H/2)], [midCol + 5, Math.floor(H/2)],
   ];
   for (const [c, r] of waterPatches) {
     if (c > 1 && c < W - 2 && r > 1 && r < H - 2) {
@@ -209,14 +174,12 @@ export function buildMatchArena(): MatchArena {
     }
   }
 
-  // Rock clusters in jungle
   const jungleRocks: Array<[number, number]> = [
-    [8, 10], [9, 10], [8, 11],
-    [10, 8], [10, 9], [11, 8],
-    [W-9, H-10], [W-10, H-10], [W-9, H-11],
-    [W-10, H-8], [W-10, H-9], [W-11, H-8],
-    [Math.floor(W/2)-3, Math.floor(H/2)], [Math.floor(W/2)-2, Math.floor(H/2)],
-    [Math.floor(W/2)+1, Math.floor(H/2)], [Math.floor(W/2)+2, Math.floor(H/2)],
+    [8, Math.floor(H/2) - 2], [9, Math.floor(H/2) - 2], [8, Math.floor(H/2) - 1],
+    [W-9, Math.floor(H/2) - 2], [W-10, Math.floor(H/2) - 2], [W-9, Math.floor(H/2) - 1],
+    [midCol - 5, Math.floor(H/2) + 2], [midCol - 4, Math.floor(H/2) + 2],
+    [midCol + 4, Math.floor(H/2) + 2], [midCol + 5, Math.floor(H/2) + 2],
+    [15, Math.floor(H/2) - 3], [W-16, Math.floor(H/2) - 3],
   ];
   for (const [c, r] of jungleRocks) {
     if (c > 1 && c < W - 2 && r > 1 && r < H - 2) {
@@ -225,67 +188,63 @@ export function buildMatchArena(): MatchArena {
   }
 
   // ── Structure Positions ────────────────────────────────────────────
-  // Player core: bottom-left corner
-  const playerCore = { col: 3, row: H - 4 };
-  // Enemy core: top-right corner
-  const enemyCore = { col: W - 4, row: 3 };
+  const playerCore = { col: midCol, row: H - 4 };
+  const enemyCore = { col: midCol, row: 3 };
 
-  // Player towers (2 per lane = 6 total, but we'll do 1 per lane for now = 3)
   const playerTowers = [
-    { col: 5, row: H - 8 },           // top lane tower
-    { col: Math.floor(W * 0.35), row: Math.floor(H * 0.65) }, // mid lane tower
-    { col: Math.floor(W * 0.65), row: H - 8 },  // bottom lane tower
+    { col: topLaneCol, row: H - 10 },            // top lane tower (left side)
+    { col: midCol, row: H - 12 },                 // mid lane tower
+    { col: botLaneCol, row: H - 10 },             // bottom lane tower (right side)
   ];
 
-  // Enemy towers
   const enemyTowers = [
-    { col: 5, row: 8 },               // top lane tower
-    { col: Math.floor(W * 0.65), row: Math.floor(H * 0.35) }, // mid lane tower
-    { col: Math.floor(W * 0.35), row: 8 },  // bottom lane tower (mirrored)
+    { col: topLaneCol, row: 9 },                  // top lane tower
+    { col: midCol, row: 11 },                     // mid lane tower
+    { col: botLaneCol, row: 9 },                  // bottom lane tower
   ];
 
-  // Mark structures with accent tiles
+  // Mark structures
   tiles[playerCore.row * W + playerCore.col] = 4;
   tiles[enemyCore.row * W + enemyCore.col] = 4;
   for (const t of playerTowers) tiles[t.row * W + t.col] = 4;
   for (const t of enemyTowers) tiles[t.row * W + t.col] = 4;
 
-  // ── Lane Waypoints (for minion movement) ───────────────────────────
-  // Player minions go from player core → toward enemy core
-  // Enemy minions go from enemy core → toward player core (reverse order)
+  // ── Lane Waypoints ─────────────────────────────────────────────────
+  // Player minions go from player core (bottom) → toward enemy core (top)
+  // Enemy minions go from enemy core (top) → toward player core (bottom)
 
-  // TOP lane: player core → up left edge → across top → enemy core
+  // TOP lane: player core → left → up left edge → right → enemy core
   const topLane = [
-    { col: playerCore.col, row: playerCore.row - 1 },  // start at player core
-    { col: topLaneLeftCol + 1, row: H - 8 },            // move to left edge
-    { col: topLaneLeftCol + 1, row: Math.floor(H / 2) }, // go up
-    { col: topLaneLeftCol + 1, row: 6 },                // reach top
-    { col: Math.floor(W / 2), row: topLaneTopRow },     // move right along top
-    { col: enemyCore.col, row: enemyCore.row + 1 },     // arrive at enemy core
+    { col: midCol, row: H - 5 },           // start at player core
+    { col: topLaneCol + 1, row: H - 5 },   // move left
+    { col: topLaneCol + 1, row: Math.floor(H/2) }, // go up
+    { col: topLaneCol + 1, row: 5 },       // reach top
+    { col: midCol, row: 5 },               // move right to enemy core
+    { col: enemyCore.col, row: enemyCore.row + 1 }, // arrive
   ];
 
-  // MID lane: straight diagonal from player core to enemy core
+  // MID lane: straight vertical from player core to enemy core
   const midLane = [];
   const midSteps = 6;
   for (let i = 0; i <= midSteps; i++) {
     const t = i / midSteps;
     midLane.push({
-      col: Math.round(playerCore.col + (enemyCore.col - playerCore.col) * t),
+      col: midCol,
       row: Math.round(playerCore.row + (enemyCore.row - playerCore.row) * t),
     });
   }
 
-  // BOTTOM lane: player core → across bottom → up right edge → enemy core
+  // BOTTOM lane: player core → right → up right edge → left → enemy core
   const bottomLane = [
-    { col: playerCore.col + 2, row: playerCore.row },   // start at player core
-    { col: Math.floor(W / 2), row: botLaneBotRow },      // move right along bottom
-    { col: botLaneRightCol, row: botLaneBotRow },         // reach right edge
-    { col: botLaneRightCol, row: Math.floor(H / 2) },     // go up
-    { col: botLaneRightCol, row: 8 },                     // reach top
-    { col: enemyCore.col, row: enemyCore.row + 1 },      // arrive at enemy core
+    { col: midCol, row: H - 5 },           // start at player core
+    { col: botLaneCol, row: H - 5 },       // move right
+    { col: botLaneCol, row: Math.floor(H/2) }, // go up
+    { col: botLaneCol, row: 5 },           // reach top
+    { col: midCol, row: 5 },               // move left to enemy core
+    { col: enemyCore.col, row: enemyCore.row + 1 }, // arrive
   ];
 
-  const playerStart = { col: playerCore.col + 1, row: playerCore.row - 1 };
+  const playerStart = { col: midCol, row: H - 6 };
 
   return {
     width: W,
