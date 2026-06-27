@@ -1,2 +1,35 @@
-skills/
+# Dependencies
 node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Local environment files (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Platform-specific / unrelated
+skills/
+upload/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Vite cache
+.vite/
+
+# TypeScript build info
+*.tsbuildinfo
