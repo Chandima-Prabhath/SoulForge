@@ -507,3 +507,47 @@ Files produced:
 - MODIFIED: src/core/realm/runState.ts (ownedSkills, equippedSkillIndices, mode, synthesis)
 - MODIFIED: src/core/ecs/systems/skillSystems.ts (dynamic stats cache, equippedIndices param)
 - MODIFIED: src/client/GameApp.ts (Sanctum integration, death→sanctum flow)
+
+---
+Task ID: phase-6-narrative-layer
+Agent: main
+Task: Build Phase 6 Narrative Layer — prologue, Voice of the World guide, Inner Sage dialogue, realm intros.
+
+Work Log:
+- Created src/data/narrative.ts — centralized narrative data:
+  - 11 prologue beats (isekai summoning sequence)
+  - Realm intro texts for 3 biomes with Sage comments
+  - 5 Sage dialogue lines (state-aware: first_sanctum, return, low_atoms, many_atoms, boss_killed)
+  - 4 combat hints (low_hp, devour_ready, boss_engaged, skill_unlocked)
+  - 5 death quotes (randomly shown in Sanctum)
+  - Skill flavor text for all 17 atoms
+- Created src/client/ui/PrologueUI.ts — cinematic overlay:
+  - Full-screen with background color shifts per beat
+  - Text fades in/out with speaker labels
+  - Auto-advances after duration OR click to advance
+  - Game loop pauses during prologue
+  - Fades into game on completion
+- Updated SanctumUI with Sage Dialogue section:
+  - Purple glowing avatar (✦) with radial gradient
+  - State-aware dialogue (first visit vs returning vs low atoms vs many atoms)
+  - Death quote shown below in red italic
+- Updated GameApp:
+  - PrologueUI initialized and shown on first load
+  - Game loop pauses during prologue
+  - Realm intro + Sage comment logged on realm entry (descend from Sanctum)
+  - Imported REALM_INTROS from narrative data
+
+Stage Summary:
+- Prologue verified via VLM: "You were nobody special." on black screen, "click to continue" at bottom
+- Clicking through advances beats: Voice of the World speaks, [Devour] acquired, Inner Sage introduced
+- After prologue: game starts, realm intro logged
+- Sanctum Sage dialogue verified: "Your grimoire is sparse. Devour more enemies..."
+- Death quote: "The realm claims another. But you... you are different."
+- 0 JS errors, production build 363KB (112KB gzipped)
+
+Files produced:
+- NEW: src/data/narrative.ts (all story text centralized)
+- NEW: src/client/ui/PrologueUI.ts (cinematic prologue overlay)
+- MODIFIED: src/client/ui/SanctumUI.ts (Sage dialogue section)
+- MODIFIED: src/client/GameApp.ts (prologue integration, realm intros)
+- MODIFIED: src/main.ts (Phase 6 banner)
