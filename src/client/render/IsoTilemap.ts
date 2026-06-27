@@ -48,6 +48,11 @@ export class IsoTilemap {
       2: colors?.rock ?? 0x6b6b75,
       3: colors?.water ?? 0x3a6db0,
       4: colors?.accent ?? 0xffb86c,
+      // Match mode tiles:
+      5: 0x2a3a5a,  // player territory (blue-tinted)
+      6: 0x5a2a2a,  // enemy territory (red-tinted)
+      7: 0x4a5a8a,  // player path (blue-tinted)
+      8: 0x8a4a4a,  // enemy path (red-tinted)
     };
 
     // Derive edge colors (darker shade of each tile color)

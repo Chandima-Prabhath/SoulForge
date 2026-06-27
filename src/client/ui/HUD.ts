@@ -311,6 +311,8 @@ export class HUD {
       case 7: return "Entering a new realm...";
       case 8: return "You died.";
       case 9: return "✦ Realm Cleared! Press R to descend ✦";
+      case 10: return "✦ VICTORY! ✦";
+      case 11: return "✦ DEFEAT ✦";
       default: return "";
     }
   }

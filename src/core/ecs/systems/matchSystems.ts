@@ -25,6 +25,7 @@ import {
   MINION_TYPES,
   STRUCTURE_TYPES,
   DEFAULT_MATCH_CONFIG,
+  TEAM_COLORS,
   type MatchArena,
 } from "../../../data/matchData";
 import { spawnDamageNumber, handleDeath } from "./combatSystems";
@@ -140,7 +141,9 @@ function spawnStructure(col: number, row: number, teamId: number, type: "tower" 
   Structure.attackRange[eid] = def.attackRange;
   Structure.attackCooldown[eid] = def.attackCooldown;
   Structure.attackTimer[eid] = 0;
-  Structure.color[eid] = def.color;
+  // Team-colored: blue for player, red for enemy
+  const teamColor = teamId === 0 ? TEAM_COLORS.player : TEAM_COLORS.enemy;
+  Structure.color[eid] = type === "core" ? teamColor.core : teamColor.structure;
   Structure.structureType[eid] = type === "core" ? 1 : 0;
   Structure.isCore[eid] = type === "core" ? 1 : 0;
 
@@ -189,7 +192,8 @@ function spawnMinion(
   Minion.attackTimer[eid] = 0;
   Minion.lane[eid] = lane;
   Minion.waypointIndex[eid] = 0;
-  Minion.color[eid] = def.color;
+  // Team-colored: blue for player minions, red for enemy minions
+  Minion.color[eid] = teamId === 0 ? TEAM_COLORS.player.minion : TEAM_COLORS.enemy.minion;
   Minion.size[eid] = def.size;
   Minion.minionType[eid] = type === "ranged" ? 1 : 0;
 }

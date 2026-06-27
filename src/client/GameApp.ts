@@ -116,6 +116,7 @@ export class GameApp {
   // Phase 7: Mode select + match mode
   private modeSelectUI!: ModeSelectUI;
   private gameMode: GameMode = "realm";
+  private matchEnding: boolean = false;
 
   constructor() {
     this.app = new Application();
@@ -695,13 +696,26 @@ export class GameApp {
       structureAISystem(dt);
       cleanupMatchEntities();
 
-      // Check for match end
-      const matchStates = matchStateQuery(world);
-      if (matchStates.length > 0) {
-        const result = MatchState.result[matchStates[0]];
-        if (result !== 0) {
-          // Match ended — wait a moment then end
-          setTimeout(() => this.endMatchMode(), 3000);
+      // Check for match end (only once — use matchEnding flag)
+      if (!this.matchEnding) {
+        const matchStates = matchStateQuery(world);
+        if (matchStates.length > 0) {
+          const result = MatchState.result[matchStates[0]];
+          if (result !== 0) {
+            this.matchEnding = true;
+            const resultText = result === 1 ? "VICTORY" : "DEFEAT";
+            console.log(
+              `%c[Match] %c${resultText}! Returning to mode select...`,
+              "color: #ffb86c; font-weight: bold;",
+              result === 1 ? "color: #40ff40;" : "color: #ff4040;"
+            );
+            // Show result notification
+            spawnVoiceOfTheWorld(result === 1 ? 10 : 11, 2);
+            setTimeout(() => {
+              this.endMatchMode();
+              this.matchEnding = false;
+            }, 3000);
+          }
         }
       }
     } else {

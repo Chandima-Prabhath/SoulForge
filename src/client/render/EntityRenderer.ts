@@ -448,9 +448,21 @@ export class EntityRenderer {
         const fgWidth = Math.max(0, (w - 1) * ratio);
         if (fgWidth > 0) {
           entry.healthBar.roundRect(-w / 2 + 0.5, 0.5, fgWidth, 3, 1);
+          // Team-colored health bars: player=green, enemy=red, match minions/structures use team color
           let color = 0x40ff40;
-          if (ratio < 0.5) color = 0xffe040;
-          if (ratio < 0.25) color = 0xff4040;
+          if (hasComponent(world, Team, eid)) {
+            if (Team.id[eid] === 0) {
+              color = 0x40c0ff; // player/ally = blue
+            } else {
+              color = 0xff4040; // enemy = red
+            }
+            // Low health override
+            if (ratio < 0.25) color = 0xff4040;
+          } else {
+            // Non-team entities (enemies in realm mode) use green→yellow→red
+            if (ratio < 0.5) color = 0xffe040;
+            if (ratio < 0.25) color = 0xff4040;
+          }
           entry.healthBar.fill({ color });
         }
         entry.healthBar.y = -36;
