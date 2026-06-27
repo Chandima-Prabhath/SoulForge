@@ -538,6 +538,7 @@ Non-negotiable principles. If a proposed feature violates any of these, it is re
 |---|---|
 | 2026-06-27 | Initial README created. Full design documented. |
 | 2026-06-27 | **Phase 0 (Foundation) COMPLETE.** Vite + TS + PixiJS + bitECS project boots, isometric tilemap renders, player spawns and moves (WASD + click-to-move), camera follows smoothly, debug HUD shows FPS/coords/realm. Production build succeeds. Ready for Phase 1 (Combat Core). |
+| 2026-06-27 | **Phase 1 (Combat Core) COMPLETE.** Player + 5 enemies spawn in Verdant Rift. Mana Bolt (right-click) fires homing projectiles with cooldown. Enemies have idle → chase → attack AI with leash. Health bars above entities, floating damage numbers, essence shard drops on death. Player can die and respawn with R. HUD shows HP, cooldown, enemy count. Production build succeeds (95KB gzipped). Ready for Phase 2 (Skill Grammar). |
 
 ---
 

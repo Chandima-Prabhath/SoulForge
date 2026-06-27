@@ -18,6 +18,7 @@ export interface RealmData {
   height: number; // tiles
   tiles: number[]; // length = width * height, row-major
   playerStart: { col: number; row: number };
+  enemySpawns: Array<{ col: number; row: number }>;
 }
 
 /**
@@ -65,6 +66,13 @@ function buildVerdantRiftPrototype(): RealmData {
     height: H,
     tiles,
     playerStart: { col: 6, row: 6 },
+    enemySpawns: [
+      { col: 14, row: 14 }, // mid-map, away from player at (6,6)
+      { col: 18, row: 10 }, // east, past the pond
+      { col: 10, row: 18 }, // southwest
+      { col: 20, row: 16 }, // far east
+      { col: 16, row: 20 }, // far south
+    ],
   };
 }
 

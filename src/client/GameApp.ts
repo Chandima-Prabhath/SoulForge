@@ -7,16 +7,16 @@
  *  - IsoTilemap, EntityRenderer, CameraController
  *  - InputManager
  *  - HUD
- *  - Fixed-timestep simulation loop
  *
- * Main loop:
- *   1. Compute frame dt (clamped).
- *   2. Step the simulation at a fixed 60 Hz (movementSystem).
- *      (For Phase 0, dt is small enough that one step per frame suffices.)
- *   3. Update input (writes to ECS).
- *   4. Update camera (reads from ECS).
- *   5. Sync renderers (reads from ECS, writes to Pixi display objects).
- *   6. Update HUD.
+ * Main loop order (each frame):
+ *   1. Read input → ECS (movement + cast request)
+ *   2. Step simulation systems in dependency order:
+ *      cooldown → facing → attack → projectile → collision → enemyAI →
+ *      movement → damageNumber → cleanupDead → lifetime
+ *   3. Update camera (reads from ECS)
+ *   4. Sync renderers (reads ECS, writes Pixi display objects)
+ *   5. Update HUD
+ *   6. Check for player death → respawn on R key
  */
 
 import { Application, Container } from "pixi.js";
@@ -25,7 +25,21 @@ import { EntityRenderer } from "./render/EntityRenderer";
 import { CameraController } from "./render/CameraController";
 import { InputManager } from "./input/InputManager";
 import { HUD } from "./ui/HUD";
-import { movementSystem, spawnPlayer } from "@core/ecs/systems/movementSystem";
+import { movementSystem } from "@core/ecs/systems/movementSystem";
+import {
+  attackSystem,
+  cooldownSystem,
+  facingSystem,
+  projectileSystem,
+  collisionSystem,
+  enemyAISystem,
+  damageNumberSystem,
+  lifetimeSystem,
+  cleanupDeadEntities,
+  spawnPlayerFull,
+  spawnEnemy,
+  clearAllEntities,
+} from "@core/ecs/systems/combatSystems";
 import { tileToWorld } from "@core/iso";
 import { verdantRiftPrototype } from "@data/realms";
 
@@ -40,6 +54,7 @@ export class GameApp {
 
   private lastTime = 0;
   private running = false;
+  private rKeyHeld = false;
 
   constructor() {
     this.app = new Application();
@@ -59,7 +74,6 @@ export class GameApp {
     document.getElementById("app")!.appendChild(canvas);
 
     // World container holds everything that lives in game space.
-    // The camera moves this container to follow the player.
     this.worldContainer = new Container();
     this.worldContainer.label = "World";
     this.app.stage.addChild(this.worldContainer);
@@ -72,10 +86,8 @@ export class GameApp {
     this.entityRenderer = new EntityRenderer();
     this.worldContainer.addChild(this.entityRenderer.container);
 
-    // Spawn the player at the realm's start tile
-    const start = verdantRiftPrototype.playerStart;
-    const startWorld = tileToWorld(start.col, start.row);
-    spawnPlayer(startWorld.x, startWorld.y);
+    // Spawn the player and enemies
+    this.spawnRealmEntities();
 
     // Camera
     this.camera = new CameraController(
@@ -87,12 +99,18 @@ export class GameApp {
     // Input — pass a screen-to-world function bound to the camera
     this.input = new InputManager((sx, sy) => this.camera.screenToWorld(sx, sy));
 
-    // Click handling on the canvas
+    // Click handling on the canvas — left = move, right = cast
     canvas.addEventListener("pointerdown", (e) => {
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
-      this.input.onCanvasClick(sx, sy);
+      if (e.button === 2) {
+        // right click — cast
+        this.input.onCanvasRightClick(sx, sy);
+      } else if (e.button === 0) {
+        // left click — move
+        this.input.onCanvasLeftClick(sx, sy);
+      }
     });
 
     // HUD
@@ -108,6 +126,29 @@ export class GameApp {
     this.worldContainer.sortableChildren = true;
   }
 
+  /**
+   * Spawn the player at the realm start + all enemies from the realm data.
+   */
+  private spawnRealmEntities() {
+    const start = verdantRiftPrototype.playerStart;
+    const startWorld = tileToWorld(start.col, start.row);
+    spawnPlayerFull(startWorld.x, startWorld.y);
+
+    for (const spawn of verdantRiftPrototype.enemySpawns) {
+      const w = tileToWorld(spawn.col, spawn.row);
+      spawnEnemy(w.x, w.y);
+    }
+  }
+
+  /**
+   * Respawn: clear all entities, re-spawn player + enemies.
+   */
+  respawn() {
+    clearAllEntities();
+    this.spawnRealmEntities();
+    console.log("%c[SoulForge] Respawned", "color: #ffb86c");
+  }
+
   start() {
     this.running = true;
     this.lastTime = performance.now();
@@ -119,22 +160,39 @@ export class GameApp {
     const now = performance.now();
     let dt = (now - this.lastTime) / 1000;
     this.lastTime = now;
-    // Clamp dt to avoid spiral-of-death on slow frames / tab switches
     if (dt > 0.1) dt = 0.1;
 
-    // Step 1: input → ECS
+    // ── Step 1: input → ECS ────────────────────────────────────────────
     this.input.update();
+    const cast = this.input.consumeCastRequest();
 
-    // Step 2: simulation (fixed-step would go here; for Phase 0 we use frame dt)
+    // R key respawn (edge-triggered so holding R doesn't spam respawns)
+    if (this.input.isRPressed() && !this.rKeyHeld) {
+      this.rKeyHeld = true;
+      this.respawn();
+    } else if (!this.input.isRPressed()) {
+      this.rKeyHeld = false;
+    }
+
+    // ── Step 2: simulation systems in dependency order ────────────────
+    cooldownSystem(dt);
+    facingSystem(dt);
+    attackSystem(dt, cast);
+    projectileSystem(dt);
+    enemyAISystem(dt);
     movementSystem(dt);
+    collisionSystem();
+    damageNumberSystem(dt);
+    cleanupDeadEntities();
+    lifetimeSystem();
 
-    // Step 3: camera → world container
+    // ── Step 3: camera → world container ───────────────────────────────
     this.camera.update(dt);
 
-    // Step 4: sync renderers (read ECS, update Pixi)
+    // ── Step 4: sync renderers ─────────────────────────────────────────
     this.entityRenderer.sync();
 
-    // Step 5: HUD
+    // ── Step 5: HUD ────────────────────────────────────────────────────
     this.hud.update(dt);
   };
 
