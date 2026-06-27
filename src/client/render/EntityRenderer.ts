@@ -211,6 +211,9 @@ export class EntityRenderer {
   // Lingering area VFX — one Graphics per area, redrawn each frame
   private lingeringGraphics: Map<number, Graphics> = new Map();
 
+  // Devour VFX — expanding purple ring when Devour skill is cast
+  private devourVfxGraphics: Map<number, Graphics> = new Map();
+
   constructor() {
     this.container = new Container();
     this.container.label = "Entities";
@@ -237,6 +240,9 @@ export class EntityRenderer {
         return { display: new Graphics() };
       case 6:
         // Lingering area — drawn dynamically in syncLingeringAreas()
+        return { display: new Graphics() };
+      case 7:
+        // Devour VFX — drawn dynamically in syncDevourVfx()
         return { display: new Graphics() };
       default:
         return { display: buildProjectileSprite(elementColor, accentColor) };
@@ -380,6 +386,9 @@ export class EntityRenderer {
     // ── Lingering Area VFX ─────────────────────────────────────────────
     this.syncLingeringAreas();
 
+    // ── Devour VFX ─────────────────────────────────────────────────────
+    this.syncDevourVfx();
+
     // ── Beam VFX ───────────────────────────────────────────────────────
     this.syncBeams();
 
@@ -388,6 +397,61 @@ export class EntityRenderer {
 
     // Sort by Y (depth)
     this.container.children.sort((a, b) => a.y - b.y);
+  }
+
+  /**
+   * Sync Devour VFX. Each Devour cast spawns an expanding purple ring that
+   * fades over 0.6s. Drawn as a multi-stroke ring with a purple color.
+   */
+  private syncDevourVfx() {
+    // Query for sprite ID 7 entities (Devour VFX) with Lifetime
+    const spriteQuery = defineQuery([Position, Sprite, Lifetime]);
+    const allSprites = spriteQuery(world);
+    const devourVfxIds = allSprites.filter((eid) => Sprite.spriteId[eid] === 7);
+    const currentSet = new Set(devourVfxIds);
+
+    // Remove deleted VFX
+    for (const [eid, gfx] of this.devourVfxGraphics.entries()) {
+      if (!currentSet.has(eid)) {
+        this.container.removeChild(gfx);
+        gfx.destroy();
+        this.devourVfxGraphics.delete(eid);
+      }
+    }
+
+    // Add or update VFX
+    for (let i = 0; i < devourVfxIds.length; i++) {
+      const eid = devourVfxIds[i];
+      let gfx = this.devourVfxGraphics.get(eid);
+      if (!gfx) {
+        gfx = new Graphics();
+        gfx.zIndex = 4;
+        this.container.addChild(gfx);
+        this.devourVfxGraphics.set(eid, gfx);
+      }
+
+      const cx = Position.x[eid];
+      const cy = Position.y[eid];
+      const remaining = Lifetime.remaining[eid];
+      // Expand from 20px to 160px over 0.6s
+      const progress = 1 - remaining / 0.6;
+      const r = 20 + progress * 140;
+      const alpha = remaining / 0.6;
+
+      gfx.clear();
+      // Outer glow
+      gfx.circle(cx, cy, r);
+      gfx.stroke({ color: 0x9040ff, width: 16, alpha: alpha * 0.3 });
+      // Mid ring
+      gfx.circle(cx, cy, r);
+      gfx.stroke({ color: 0xd0a0ff, width: 6, alpha: alpha * 0.7 });
+      // Core ring
+      gfx.circle(cx, cy, r);
+      gfx.stroke({ color: 0xffffff, width: 2, alpha: alpha });
+      // Inner fill (faint)
+      gfx.circle(cx, cy, r * 0.8);
+      gfx.fill({ color: 0x9040ff, alpha: alpha * 0.1 });
+    }
   }
 
   /**

@@ -733,7 +733,7 @@ export function enemyAISystem(dt: number) {
           EnemyAI.attackTimer[eid] = EnemyAI.attackCooldown[eid];
           // Apply melee damage to the player
           if (hasComponent(world, Health, pid)) {
-            const dmg = 8;
+            const dmg = 5;
             Health.current[pid] = Math.max(0, Health.current[pid] - dmg);
             spawnDamageNumber(Position.x[pid], Position.y[pid] - 20, dmg, false);
             if (Health.current[pid] <= 0) {

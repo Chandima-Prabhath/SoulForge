@@ -334,17 +334,36 @@ export function devourSkillSystem(_dt: number, cast: DevourCastRequest): boolean
     }
   }
 
-  // 3. Spawn notification
+  // 3. Spawn notification + VFX
   if (shardsDevoured > 0 || enemiesExecuted > 0) {
     spawnVoiceOfTheWorld(6, 2); // "[Devour] activated."
+    spawnDevourVfx(px, py);
     console.log(
       `%c[Devour] %cDevoured ${shardsDevoured} shards, executed ${enemiesExecuted} enemies.`,
       "color: #ffb86c; font-weight: bold;",
       "color: #e0e0e8;"
     );
+  } else {
+    // Even if nothing was devoured, show the VFX for feedback
+    spawnDevourVfx(px, py);
   }
 
   return true;
+}
+
+/**
+ * Spawn a visual effect for the Devour skill — an expanding purple ring.
+ */
+function spawnDevourVfx(x: number, y: number) {
+  const eid = addEntity(world);
+  addComponent(world, Position, eid);
+  addComponent(world, Sprite, eid);
+  addComponent(world, Lifetime, eid);
+  Position.x[eid] = x;
+  Position.y[eid] = y;
+  Sprite.spriteId[eid] = 7; // 7 = devour vfx
+  Sprite.zLayer[eid] = 4;
+  Lifetime.remaining[eid] = 0.6;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
