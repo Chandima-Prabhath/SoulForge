@@ -286,3 +286,101 @@ Next Phase (Phase 3 — Devour System):
 - Mimicry: devour special enemies to take their form (changes base stats)
 - Skill Synthesis: combine 2+ known skills at the Sanctum to create new ones
 - "Voice of the World" notifications: 「Skill acquired: Frost Echo」「Analysis complete. New modifier unlocked: Pierce.」
+
+---
+Task ID: phase-2.5-modifiers-and-bugfixes
+Agent: main
+Task: Fix bugs reported by user (beam stays forever) + implement missing modifier behaviors (Split, Linger, Chain, Grow) that were stubs in Phase 2. Wire StatusEffect slow into enemy AI. Fix nova multi-hit.
+
+Work Log:
+- BUG FIX: Beam VFX stayed forever (reported by user)
+  Root cause: lifetimeSystem only removed entities when Lifetime.remaining <= 0, but no system decremented Lifetime for non-projectile entities (beams, damage numbers, essence shards). Only projectileSystem decremented Lifetime.
+  Fix: Made lifetimeSystem the single source of truth — now takes dt and decrements Lifetime for ALL entities. Removed duplicate decrement from projectileSystem.
+  This is the right architectural call: one system owns one responsibility.
+
+- BUG FIX: Nova could multi-hit the same enemy per frame
+  Fix: Added novaHitSets Map<novaEntityId, Set<enemyEntityId>> tracking. Each nova damages each enemy at most once.
+
+- BUG FIX: Frost Nova's slow status effect was a no-op
+  Fix: enemyAISystem now computes speedMult from active slow effects and applies it to velocity in idle and chase states.
+
+- MODIFIER: Split — on enemy kill, spawns 2 child projectiles at ±0.6 rad from kill direction. Children inherit 50% damage, 70% radius, 90% speed, parent's element/status. Children don't split further (prevents exponential growth).
+
+- MODIFIER: Linger — on projectile impact, spawns a LingeringArea entity that damages enemies standing in it (50% of hit dmg/sec, 0.25s ticks). Lasts 2s. Applies status effect.
+
+- MODIFIER: Chain — on hit, bounces projectile to nearest unhit enemy within 200px. Up to 3 bounces. Uses projectileHitSets Map for dedup.
+
+- MODIFIER: Grow — scales damage and radius up to 1.5× over 400px travel. Linear scaling. baseDamage/baseRadius stored at spawn.
+
+- NEW COMPONENT: LingeringArea (damagePerSec, radius, teamId, color, statusType, statusDuration, statusMagnitude, tickAccumulator)
+- EXTENDED Projectile: splitOnKill, lingerDuration, chainCount, growWithDistance, distanceTraveled, baseDamage, baseRadius
+- NEW SYSTEMS: lingeringAreaSystem, growModifierSystem
+- NEW RENDERER: syncLingeringAreas() draws translucent pulsing circles in element color
+- 5 modifier test skills added to STARTER_SKILLS
+- Slot 3 equipped with Chain Lightning for testing
+
+Stage Summary:
+- All 5 modifiers functional (was only Pierce before)
+- 3 bugs fixed (beam lifetime, nova multi-hit, slow no-op)
+- Single-source-of-truth Lifetime system (no more scattered decrements)
+- Production build: 318KB main (100KB gzipped)
+
+---
+Task ID: phase-3-devour-system
+Agent: main
+Task: Build Phase 3 Devour System — Rimuru's signature power. Kill enemy → essence shard → walk near → auto-devour → atom unlock → Voice of the World notification. Active [Devour] skill on E key.
+
+Work Log:
+- Created src/data/enemies.ts — 3 enemy types (Frost Slime, Ember Wisp, Storm Sprite) with unique stats + devour drops
+- Added Phase 3 ECS components: EnemyType, DevourProgress (4 bitmasks), VoiceOfTheWorld, extended EssenceShard with enemyTypeId + devoured flag
+- Created src/core/ecs/systems/devourSystems.ts (~400 lines):
+  - autoDevourSystem: proximity devour (50px range)
+  - devourSkillSystem: active Devour (140px AOE, execute HP<25%, 8s cooldown)
+  - voiceOfTheWorldSystem: ages notifications
+  - spawnVoiceOfTheWorld: spawns notification entities
+  - tryUnlock: bitmask atom unlock with dedup
+  - addDevourProgressToPlayer, setEnemyType, getDevourProgressSummary helpers
+- Updated combatSystems handleDeath() to spawn typed essence shards (checks EnemyType)
+- Updated combatSystems spawnEssenceShard() to accept enemyTypeId parameter
+- Updated InputManager: E key → consumeDevourRequest() (edge-triggered)
+- Updated GameApp: wired autoDevourSystem, devourSkillSystem, voiceOfTheWorldSystem; spawn typed enemies cycled across 5 spawn points; add DevourProgress to player
+- Updated HUD: DEVOUR section (cooldown bar, devour count, unlocked atoms summary), Voice of the World notification overlay (centered top)
+- Updated index.html: DEVOUR HUD section + voice notification div
+- Updated main.ts: Phase 3 banner
+
+Starting atoms: Force element, Projectile form, Ranged vector, no modifiers.
+Devour drops: Frost Slime→Frost+Linger, Ember Wisp→Fire+Split, Storm Sprite→Lightning+Chain.
+
+Stage Summary:
+- Devour loop fully functional (verified via agent-browser):
+  - Killed Frost Slime with 3 Mana Bolts
+  - Walked south to essence shard
+  - Auto-devoured (50px proximity)
+  - Frost element unlocked (devourCount 0→1)
+  - Voice of the World: "New element unlocked: Frost" displayed
+  - Console: "[Voice of the World] Frost unlocked!"
+- Active [Devour] skill (E key): AOE devour + execute, 8s cooldown
+- HUD shows Devour cooldown, count, unlocked atoms in real time
+- Voice of the World notifications fade over 3.5s
+- 0 JS errors, production build 325KB (102KB gzipped)
+- This is the path-dependent growth mechanism (README §5 Layer 3)
+
+Files produced:
+- NEW: src/data/enemies.ts (enemy type registry)
+- NEW: src/core/ecs/systems/devourSystems.ts (~400 lines)
+- NEW: scripts/phase3-devour-test.js
+- NEW: download/soulforge-phase3-devour-unlock.png
+- MODIFIED: src/core/ecs/world.ts (4 new components, extended EssenceShard)
+- MODIFIED: src/core/ecs/systems/combatSystems.ts (typed essence shards, EnemyType import)
+- MODIFIED: src/client/GameApp.ts (wired Devour systems, typed enemy spawns)
+- MODIFIED: src/client/input/InputManager.ts (E key for Devour)
+- MODIFIED: src/client/ui/HUD.ts (Devour section + voice notifications)
+- MODIFIED: index.html (DEVOUR HUD + voice overlay)
+- MODIFIED: src/main.ts (Phase 3 banner)
+
+Next Phase (Phase 4 — First Realm Roguelite):
+- Procedural realm generation seeded by composeRealmSeed (README §5 Layer 1)
+- Multiple biomes with different enemy distributions
+- Realm boss at the end
+- Death = return to Sanctum, lose realm progress, keep unlocked atoms
+- Essence Salt: realm seed personalized by player history
