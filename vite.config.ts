@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import { fileURLToPath, URL } from "node:url";
 
 export default defineConfig({
-  root: "/home/z/my-project",
+  root: "./",
   resolve: {
     alias: {
       "@core": fileURLToPath(new URL("./src/core", import.meta.url)),
@@ -19,9 +19,9 @@ export default defineConfig({
       // Restrict file serving to project source + dependencies only.
       // Prevents Vite from scanning stray HTML files (e.g., in skills/).
       allow: [
-        "/home/z/my-project/src",
-        "/home/z/my-project/index.html",
-        "/home/z/my-project/node_modules",
+        "./src",
+        "./index.html",
+        "./node_modules",
       ],
     },
   },
