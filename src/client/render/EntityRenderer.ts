@@ -31,7 +31,10 @@ import {
   Beam,
   NovaRing,
   LingeringArea,
+  EnemyType,
+  EssenceShard,
 } from "@core/ecs/world";
+import { ENEMY_TYPES } from "@data/enemies";
 
 const spriteQuery = defineQuery([Position, Sprite]);
 const beamQuery = defineQuery([Beam]);
@@ -94,9 +97,14 @@ function buildPlayerSprite(): Container {
   return c;
 }
 
-function buildEnemySprite(): Container {
+function buildEnemySprite(primaryColor: number = 0x8a3a4a): Container {
   const c = new Container();
   c.label = "EnemySprite";
+
+  // Derive a darker stroke color from the primary
+  const strokeColor = (primaryColor & 0xfefefe) >> 1;
+  // Derive a lighter highlight color
+  const highlightColor = Math.min(0xffffff, primaryColor + 0x404040);
 
   const shadow = new Graphics();
   shadow.ellipse(0, 4, 16, 7);
@@ -109,11 +117,11 @@ function buildEnemySprite(): Container {
   body.quadraticCurveTo(-14, -14, 0, -14);
   body.quadraticCurveTo(14, -14, 14, 4);
   body.closePath();
-  body.fill({ color: 0x8a3a4a });
-  body.stroke({ color: 0x5a2030, width: 1 });
+  body.fill({ color: primaryColor });
+  body.stroke({ color: strokeColor, width: 1 });
   // Highlight
   body.ellipse(-4, -8, 4, 3);
-  body.fill({ color: 0xc86a7a, alpha: 0.7 });
+  body.fill({ color: highlightColor, alpha: 0.7 });
   // Eyes — angry slits
   body.moveTo(-6, -4);
   body.lineTo(-3, -2);
@@ -150,22 +158,26 @@ function buildProjectileSprite(color: number, accentColor: number): Container {
   return c;
 }
 
-function buildEssenceShardSprite(): Container {
+function buildEssenceShardSprite(color: number = 0xffb86c): Container {
   const c = new Container();
   c.label = "EssenceShard";
+
+  // Derive lighter and darker shades
+  const lightColor = Math.min(0xffffff, color + 0x202020);
+  const darkColor = (color & 0xfefefe) >> 1;
 
   const g = new Graphics();
   // Outer aura
   g.circle(0, 0, 9);
-  g.fill({ color: 0xffb86c, alpha: 0.2 });
+  g.fill({ color, alpha: 0.2 });
   // Diamond shape
   g.moveTo(0, -6);
   g.lineTo(5, 0);
   g.lineTo(0, 6);
   g.lineTo(-5, 0);
   g.closePath();
-  g.fill({ color: 0xffd070 });
-  g.stroke({ color: 0xff9040, width: 1 });
+  g.fill({ color: lightColor });
+  g.stroke({ color: darkColor, width: 1 });
   c.addChild(g);
 
   return c;
@@ -222,7 +234,8 @@ export class EntityRenderer {
   private buildDisplayFor(
     spriteId: number,
     elementColor: number = 0xe0e0e8,
-    accentColor: number = 0xffffff
+    accentColor: number = 0xffffff,
+    entityId: number = -1
   ): { display: Container; isText?: boolean } {
     switch (spriteId) {
       case 0:
@@ -232,8 +245,24 @@ export class EntityRenderer {
       case 2:
         return { display: buildDamageNumberText(), isText: true };
       case 3:
+        // Essence shard — color based on the enemy type that dropped it
+        if (entityId >= 0 && hasComponent(world, EssenceShard, entityId)) {
+          const typeId = EssenceShard.enemyTypeId[entityId];
+          const enemyDef = ENEMY_TYPES[typeId];
+          if (enemyDef) {
+            return { display: buildEssenceShardSprite(enemyDef.color) };
+          }
+        }
         return { display: buildEssenceShardSprite() };
       case 4:
+        // Enemy — color based on enemy type
+        if (entityId >= 0 && hasComponent(world, EnemyType, entityId)) {
+          const typeId = EnemyType.typeId[entityId];
+          const enemyDef = ENEMY_TYPES[typeId];
+          if (enemyDef) {
+            return { display: buildEnemySprite(enemyDef.color) };
+          }
+        }
         return { display: buildEnemySprite() };
       case 5:
         // Nova ring — placeholder container, drawn dynamically in sync()
@@ -268,7 +297,7 @@ export class EntityRenderer {
         : 0xffffff;
 
       if (!this.sprites.has(eid)) {
-        const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor);
+        const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor, eid);
         display.zIndex = Sprite.zLayer[eid];
 
         const entry: SpriteEntry = {
@@ -299,7 +328,7 @@ export class EntityRenderer {
         if (entry.spriteId !== spriteId || (spriteId === 1 && entry.elementColor !== elementColor)) {
           this.container.removeChild(entry.display);
           entry.display.destroy();
-          const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor);
+          const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor, eid);
           display.zIndex = Sprite.zLayer[eid];
           entry.display = display;
           entry.spriteId = spriteId;
