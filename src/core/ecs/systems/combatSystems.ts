@@ -514,18 +514,29 @@ export function cleanupDeadEntities() {
   }
 
   // Also clean up the player if they're dead (HP <= 0)
-  // — player respawn is handled by GameApp on R key, which clears all entities.
+  // — Phase 4: save DevourProgress BEFORE removing the player, so the
+  //   roguelite death loop can restore it in the next realm.
   const players = playerQuery(world);
   for (let i = 0; i < players.length; i++) {
     const pid = players[i];
     if (Health.current[pid] <= 0) {
-      // Drop a final essence shard where they fell
-      if (!hasComponent(world, EssenceShard, pid)) {
-        // Just remove — GameApp will show "DEAD" and respawn on R press
-        removeEntity(world, pid);
+      // Call the death callback to save DevourProgress before removal
+      if (playerDeathCallback) {
+        playerDeathCallback(pid);
       }
+      removeEntity(world, pid);
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Player Death Callback — allows GameApp to save state before player removal
+// ─────────────────────────────────────────────────────────────────────────────
+
+let playerDeathCallback: ((pid: number) => void) | null = null;
+
+export function setPlayerDeathCallback(cb: (pid: number) => void) {
+  playerDeathCallback = cb;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

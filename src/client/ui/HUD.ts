@@ -231,8 +231,30 @@ export class HUD {
       case 4: return `New modifier unlocked: ${atomName}`;
       case 5: return "Analysis complete.";
       case 6: return "[Devour] activated.";
+      case 7: return "Entering a new realm...";
+      case 8: return "You died. Press R to descend.";
       default: return "";
     }
+  }
+
+  /**
+   * Set the realm name displayed in the HUD (called on realm transition).
+   */
+  setRealmName(name: string) {
+    this.realmEl.textContent = `${name} (Depth varies)`;
+  }
+
+  /**
+   * Update the HUD with run state info (depth, total devoured).
+   */
+  updateRunState(depth: number, totalDevoured: number) {
+    // Update the realm display to show depth
+    if (this.realmEl.textContent && !this.realmEl.textContent.includes("Depth")) {
+      this.realmEl.textContent = this.realmEl.textContent.replace(" (Prototype)", "");
+    }
+    // Could add a separate depth display here in the future
+    void depth;
+    void totalDevoured;
   }
 
   hideLoading() {

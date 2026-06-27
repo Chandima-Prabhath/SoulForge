@@ -1,39 +1,34 @@
 /**
  * IsoTilemap — PixiJS renderer for an isometric tilemap.
  *
- * This is a CLIENT-only class. It owns Pixi display objects and is
- * never imported from src/core/. Game Core produces RealmData; the
- * renderer consumes it.
+ * Phase 4: tile colors now come from the biome, not hardcoded. The tilemap
+ * accepts a BiomeDef and uses its tileColors to shade tiles. This means
+ * forest realms look green, cave realms look brown/orange, and void realms
+ * look purple/dark.
  *
- * Phase 0: draws flat-shaded diamond tiles. No sprites yet — that's Phase 1.
- * Tiles are drawn as Graphics polygons with biome-appropriate colors.
+ * Tile codes:
+ *   0 = grass (walkable) — biome-specific ground color
+ *   1 = path (walkable) — biome-specific path color
+ *   2 = rock (obstacle) — biome-specific rock color
+ *   3 = water (obstacle) — biome-specific water/lava/void color
+ *   4 = accent (boss arena floor) — biome-specific accent color
  */
 
 import { Container, Graphics } from "pixi.js";
 import { TILE_W, TILE_H, tileToWorld } from "@core/iso";
 import type { RealmData } from "@data/realms";
-
-const TILE_COLORS: Record<number, number> = {
-  0: 0x4a7c3a, // grass — forest green
-  1: 0x9c8456, // path — tan
-  2: 0x6b6b75, // rock — slate
-  3: 0x3a6db0, // water — blue
-};
-
-const TILE_EDGE_COLORS: Record<number, number> = {
-  0: 0x3a6028,
-  1: 0x7a6840,
-  2: 0x4a4a55,
-  3: 0x2a4d80,
-};
+import type { BiomeDef } from "@data/biomes";
+import { getBiomeById } from "@data/biomes";
 
 export class IsoTilemap {
   readonly container: Container;
   private gfx: Graphics;
   private realm: RealmData;
+  private biome: BiomeDef | undefined;
 
   constructor(realm: RealmData) {
     this.realm = realm;
+    this.biome = getBiomeById(realm.biome);
     this.container = new Container();
     this.container.label = "IsoTilemap";
     this.gfx = new Graphics();
@@ -45,11 +40,28 @@ export class IsoTilemap {
     const { width, height, tiles } = this.realm;
     this.gfx.clear();
 
+    // Use biome colors if available, otherwise default to forest palette
+    const colors = this.biome?.tileColors;
+    const tileColors: Record<number, number> = {
+      0: colors?.grass ?? 0x4a7c3a,
+      1: colors?.path ?? 0x9c8456,
+      2: colors?.rock ?? 0x6b6b75,
+      3: colors?.water ?? 0x3a6db0,
+      4: colors?.accent ?? 0xffb86c,
+    };
+
+    // Derive edge colors (darker shade of each tile color)
+    const tileEdgeColors: Record<number, number> = {};
+    for (const k of Object.keys(tileColors)) {
+      const key = Number(k);
+      tileEdgeColors[key] = (tileColors[key] & 0xfefefe) >> 1;
+    }
+
     for (let row = 0; row < height; row++) {
       for (let col = 0; col < width; col++) {
         const tileCode = tiles[row * width + col];
-        const color = TILE_COLORS[tileCode] ?? TILE_COLORS[0];
-        const edge = TILE_EDGE_COLORS[tileCode] ?? TILE_EDGE_COLORS[0];
+        const color = tileColors[tileCode] ?? tileColors[0];
+        const edge = tileEdgeColors[tileCode] ?? tileEdgeColors[0];
         const { x, y } = tileToWorld(col, row);
 
         // Diamond polygon
@@ -60,13 +72,18 @@ export class IsoTilemap {
         this.gfx.closePath();
         this.gfx.fill({ color });
         this.gfx.stroke({ color: edge, width: 0.5, alpha: 0.4 });
+
+        // Boss arena accent — draw a glowing center marker on accent tiles
+        if (tileCode === 4) {
+          this.gfx.circle(x, y, 2);
+          this.gfx.fill({ color: 0xffffff, alpha: 0.3 });
+        }
       }
     }
   }
 
   /**
    * Test whether a world point is inside the map bounds.
-   * Phase 0 uses this only for HUD display — collision comes later.
    */
   isInside(col: number, row: number): boolean {
     return (
@@ -75,5 +92,12 @@ export class IsoTilemap {
       col < this.realm.width &&
       row < this.realm.height
     );
+  }
+
+  /**
+   * Get the biome definition for this tilemap's realm.
+   */
+  getBiome(): BiomeDef | undefined {
+    return this.biome;
   }
 }

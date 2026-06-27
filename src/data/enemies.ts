@@ -103,6 +103,62 @@ export const ENEMY_TYPES: Record<number, EnemyTypeDef> = {
     ],
     flavor: "A crackling knot of wind and static. Announces itself with thunder.",
   },
+  3: {
+    id: 3,
+    name: "Treant Boss",
+    spriteId: 4,
+    color: 0x4a7c3a,
+    hp: 200,
+    speed: 60,
+    aggroRange: 300,
+    attackRange: 50,
+    attackDamage: 15,
+    attackCooldown: 1.8,
+    devourDrops: [
+      { type: "element", id: 2, chance: 1.0 }, // Frost
+      { type: "element", id: 1, chance: 1.0 }, // Fire
+      { type: "form", id: 2, chance: 1.0 },    // Nova form
+      { type: "modifier", id: 0, chance: 0.5 }, // Pierce
+    ],
+    flavor: "An ancient guardian of the Verdant Rift. Its roots run deep.",
+  },
+  4: {
+    id: 4,
+    name: "Void Shade",
+    spriteId: 4,
+    color: 0x9040ff,
+    hp: 80,
+    speed: 110,
+    aggroRange: 280,
+    attackRange: 35,
+    attackDamage: 12,
+    attackCooldown: 1.1,
+    devourDrops: [
+      { type: "element", id: 4, chance: 1.0 }, // Void element
+      { type: "modifier", id: 4, chance: 0.3 }, // Grow modifier
+    ],
+    flavor: "A fragment of the void given form. It devours light.",
+  },
+  5: {
+    id: 5,
+    name: "Void Titan",
+    spriteId: 4,
+    color: 0xd0a0ff,
+    hp: 350,
+    speed: 70,
+    aggroRange: 350,
+    attackRange: 60,
+    attackDamage: 20,
+    attackCooldown: 2.0,
+    devourDrops: [
+      { type: "element", id: 4, chance: 1.0 }, // Void
+      { type: "element", id: 3, chance: 1.0 }, // Lightning
+      { type: "form", id: 1, chance: 1.0 },    // Beam
+      { type: "modifier", id: 4, chance: 1.0 }, // Grow
+      { type: "modifier", id: 1, chance: 0.5 }, // Split
+    ],
+    flavor: "A colossus of the void. Its presence warps reality.",
+  },
 };
 
 /**
