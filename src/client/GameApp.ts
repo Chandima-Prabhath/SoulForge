@@ -66,6 +66,8 @@ import {
 } from "@core/realm/runState";
 import { defineQuery, hasComponent } from "bitecs";
 import { world, PlayerTag, Health, DevourProgress, EnemyAI } from "@core/ecs/world";
+import { SanctumUI } from "./ui/SanctumUI";
+import { playerSkills, rebuildSkillStatsCache } from "@core/ecs/systems/skillSystems";
 
 const playerDeathCheckQuery = defineQuery([PlayerTag, Health]);
 
@@ -87,6 +89,9 @@ export class GameApp {
   private currentRealm: GeneratedRealm | null = null;
   private bossEid: number = -1;
   private realmTransitioning = false;
+
+  // Phase 5: Sanctum UI
+  private sanctumUI!: SanctumUI;
 
   constructor() {
     this.app = new Application();
@@ -114,6 +119,9 @@ export class GameApp {
     // Entity renderer (created before tilemap so entities render on top)
     this.entityRenderer = new EntityRenderer();
     this.worldContainer.addChild(this.entityRenderer.container);
+
+    // Phase 5: Sync owned skills to the registry before generating the first realm
+    this.syncOwnedSkillsToRegistry();
 
     // Generate the first realm
     this.generateAndLoadRealm();
@@ -143,6 +151,9 @@ export class GameApp {
     // HUD
     this.hud = new HUD(this.currentRealm?.name ?? "Unknown");
     this.hud.hideLoading();
+
+    // Phase 5: Initialize Sanctum UI
+    this.sanctumUI = new SanctumUI(this.runState, () => this.descendFromSanctum());
 
     // Handle window resize
     window.addEventListener("resize", () => {
@@ -232,7 +243,11 @@ export class GameApp {
 
     const start = realm.playerStart;
     const startWorld = tileToWorld(start.col, start.row);
-    const pid = spawnPlayerWithSkills(startWorld.x, startWorld.y);
+    const pid = spawnPlayerWithSkills(
+      startWorld.x,
+      startWorld.y,
+      this.runState.equippedSkillIndices
+    );
 
     // Restore DevourProgress from run state (persists across deaths)
     addDevourProgressToPlayer(pid);
@@ -290,18 +305,36 @@ export class GameApp {
    */
   private onPlayerDeath() {
     // DevourProgress is already saved by the death callback registered in init().
-    // This method just advances the run state and generates the new realm.
 
-    // Advance the run state (depth++, runNumber++)
+    // Advance the run state (depth++, runNumber++, mode → sanctum)
     const oldDepth = this.runState.depth;
     this.runState = advanceRunOnDeath(this.runState);
 
     console.log(
-      `%c[Death] %cYou died on depth ${oldDepth}. Descending to depth ${this.runState.depth}...`,
+      `%c[Death] %cYou died on depth ${oldDepth}. Entering Sanctum...`,
       "color: #ff4040; font-weight: bold;",
       "color: #e0e0e8;"
     );
-    spawnVoiceOfTheWorld(8, 2); // "You died. Descending..."
+
+    // Phase 5: Show the Sanctum instead of immediately generating a new realm.
+    // The player crafts/synthesizes/equips skills, then clicks "Descend".
+    this.sanctumUI.updateRunState(this.runState);
+    this.sanctumUI.show();
+  }
+
+  /**
+   * Phase 5: Called when the player clicks "Descend" in the Sanctum.
+   * Generates a new realm and restores the player's equipped skills.
+   */
+  private descendFromSanctum() {
+    console.log(
+      `%c[Sanctum] %cDescending to depth ${this.runState.depth}...`,
+      "color: #ffb86c; font-weight: bold;",
+      "color: #e0e0e8;"
+    );
+
+    // Sync the player's owned skills to the skillSystems registry
+    this.syncOwnedSkillsToRegistry();
 
     // Generate and load the new realm
     this.generateAndLoadRealm();
@@ -310,6 +343,35 @@ export class GameApp {
     if (this.hud && this.currentRealm) {
       this.hud.setRealmName(this.currentRealm.name);
     }
+  }
+
+  /**
+   * Phase 5: Sync the RunState's ownedSkills to the skillSystems playerSkills array.
+   * Also updates the stats cache. Called before spawning the player so that
+   * spawnPlayerWithSkills can read the correct skill indices.
+   */
+  private syncOwnedSkillsToRegistry() {
+    // Replace the playerSkills array contents with the run state's owned skills
+    playerSkills.length = 0; // clear
+    for (const skill of this.runState.ownedSkills) {
+      playerSkills.push(skill);
+    }
+    // Rebuild the stats cache
+    // (getSkillStats reads from playerSkillStatsCache which is built at module load)
+    // We need to rebuild it — but it's a const array. Let me use a different approach:
+    // spawnPlayerWithSkills reads from playerSkillStatsCache, which was built from STARTER_SKILLS.
+    // For Phase 5, we need to make the stats cache dynamic.
+    // For now, let's rebuild it by re-importing computeSkillStats for each skill.
+    // The skillSystems module exports getSkillStats which reads the cache.
+    // We'll update the cache directly.
+    this.rebuildSkillStatsCache();
+  }
+
+  /**
+   * Rebuild the skill stats cache from the current playerSkills array.
+   */
+  private rebuildSkillStatsCache() {
+    rebuildSkillStatsCache();
   }
 
   /**
@@ -324,9 +386,10 @@ export class GameApp {
     // Check if player is dead
     const players = playerDeathCheckQuery(world);
     if (players.length === 0) {
-      // Player is dead — trigger death loop
+      // Player is dead — trigger death loop (shows Sanctum)
       this.onPlayerDeath();
     }
+    // If player is alive, R does nothing (prevents accidental realm skips)
   }
 
   start() {
@@ -337,6 +400,13 @@ export class GameApp {
 
   private tick = () => {
     if (!this.running) return;
+
+    // Phase 5: Pause simulation while the Sanctum is open
+    if (this.sanctumUI && this.sanctumUI.isVisible()) {
+      this.lastTime = performance.now();
+      return;
+    }
+
     const now = performance.now();
     let dt = (now - this.lastTime) / 1000;
     this.lastTime = now;

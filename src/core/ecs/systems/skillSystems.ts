@@ -55,14 +55,26 @@ export const playerSkills: SkillDefinition[] = [...STARTER_SKILLS];
 /**
  * Cached stats per skill index — recomputed only when the skill changes.
  */
-const playerSkillStatsCache: SkillStats[] = STARTER_SKILLS.map(computeSkillStats);
+let playerSkillStatsCache: SkillStats[] = STARTER_SKILLS.map(computeSkillStats);
 
 export function getSkillStats(slotIndex: number): SkillStats | null {
+  // If the index is beyond the cache, recompute it on the fly
+  if (slotIndex >= playerSkillStatsCache.length && slotIndex < playerSkills.length) {
+    return computeSkillStats(playerSkills[slotIndex]);
+  }
   return playerSkillStatsCache[slotIndex] ?? null;
 }
 
 export function getSkill(slotIndex: number): SkillDefinition | null {
   return playerSkills[slotIndex] ?? null;
+}
+
+/**
+ * Phase 5: Rebuild the stats cache from the current playerSkills array.
+ * Call this after crafting/synthesizing new skills.
+ */
+export function rebuildSkillStatsCache() {
+  playerSkillStatsCache = playerSkills.map(computeSkillStats);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -573,7 +585,11 @@ function writeCooldown(eid: number, slot: number, value: number) {
 // Player spawner — Phase 2 version with SkillSlot
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function spawnPlayerWithSkills(x: number, y: number): number {
+export function spawnPlayerWithSkills(
+  x: number,
+  y: number,
+  equippedIndices?: number[]
+): number {
   const eid = addEntity(world);
   addComponent(world, Position, eid);
   addComponent(world, Velocity, eid);
@@ -604,20 +620,22 @@ export function spawnPlayerWithSkills(x: number, y: number): number {
   Cooldown.current[eid] = 0;
   Cooldown.max[eid] = 0;
 
-  // Equip starter skills: slots 0-2 = base skills, slot 3 = Chain Lightning (modifier test)
-  // (Slot 3 will be replaced by [Devour] in Phase 3 proper)
-  SkillSlot.skillIndex0[eid] = 0; // Mana Bolt
-  SkillSlot.skillIndex1[eid] = 1; // Frost Nova
-  SkillSlot.skillIndex2[eid] = 2; // Lightning Beam
-  SkillSlot.skillIndex3[eid] = 6; // Chain Lightning (modifier test, index 6 in STARTER_SKILLS)
+  // Phase 5: Equip skills from the provided indices (defaults to starter kit).
+  // The GameApp passes the RunState's equippedSkillIndices so crafted skills
+  // are properly equipped after descending from the Sanctum.
+  const equipped = equippedIndices ?? [0, 1, 2, -1];
+  SkillSlot.skillIndex0[eid] = equipped[0] ?? -1;
+  SkillSlot.skillIndex1[eid] = equipped[1] ?? -1;
+  SkillSlot.skillIndex2[eid] = equipped[2] ?? -1;
+  SkillSlot.skillIndex3[eid] = equipped[3] ?? -1;
   SkillSlot.cd0[eid] = 0;
   SkillSlot.cd1[eid] = 0;
   SkillSlot.cd2[eid] = 0;
   SkillSlot.cd3[eid] = 0;
-  SkillSlot.cdMax0[eid] = playerSkillStatsCache[0].cooldown;
-  SkillSlot.cdMax1[eid] = playerSkillStatsCache[1].cooldown;
-  SkillSlot.cdMax2[eid] = playerSkillStatsCache[2].cooldown;
-  SkillSlot.cdMax3[eid] = playerSkillStatsCache[6].cooldown;
+  SkillSlot.cdMax0[eid] = equipped[0] >= 0 ? (getSkillStats(equipped[0])?.cooldown ?? 0) : 0;
+  SkillSlot.cdMax1[eid] = equipped[1] >= 0 ? (getSkillStats(equipped[1])?.cooldown ?? 0) : 0;
+  SkillSlot.cdMax2[eid] = equipped[2] >= 0 ? (getSkillStats(equipped[2])?.cooldown ?? 0) : 0;
+  SkillSlot.cdMax3[eid] = equipped[3] >= 0 ? (getSkillStats(equipped[3])?.cooldown ?? 0) : 0;
 
   return eid;
 }
