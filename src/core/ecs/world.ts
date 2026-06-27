@@ -97,11 +97,26 @@ export const Team = defineComponent({
 /**
  * Projectile — traveling damage carrier. Owns its damage value, lifetime,
  * and team so it only hits enemies of the opposing team.
+ *
+ * Phase 2 additions:
+ *   color       — hex color for procedural VFX (from element)
+ *   accentColor — secondary color for VFX highlights
+ *   statusType  — 0=none, 1=burn, 2=slow, 3=shock, 4=drain (from element)
+ *   statusDuration — seconds of status effect applied on hit
+ *   statusMagnitude — per-type magnitude (dmg/sec, slow%, etc.)
+ *   elementId   — 0..4 (used by renderer for particle styling)
  */
 export const Projectile = defineComponent({
   damage: Types.f32,
   teamId: Types.ui8, // team that fired it; hits the OTHER team
   pierceCount: Types.ui8, // how many more enemies it can hit before despawning
+  // Phase 2 fields:
+  color: Types.ui32,
+  accentColor: Types.ui32,
+  statusType: Types.ui8,
+  statusDuration: Types.f32,
+  statusMagnitude: Types.f32,
+  elementId: Types.ui8,
 });
 
 /**
@@ -166,6 +181,81 @@ export const DamageNumber = defineComponent({
  */
 export const EssenceShard = defineComponent({
   value: Types.f32,
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2 — Skill Grammar
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * SkillSlot — holds the SkillDefinition for one of the player's 4 ability slots.
+ * Stored as a fixed-size array of integers (because bitECS doesn't support
+ * string fields). We use a parallel SkillRegistry (in core/grammar/registry.ts)
+ * to look up the SkillDefinition by ID.
+ *
+ * Field layout:
+ *   skillIndex[0..3]  — index into the player's owned skills array, or -1 if empty
+ *   cooldownCurrent[0..3] — current cooldown seconds remaining
+ *   cooldownMax[0..3]     — max cooldown for this skill (cached for HUD)
+ *
+ * Player has 4 slots. Slot 0 is reserved for [Devour] in Phase 3.
+ */
+export const SkillSlot = defineComponent({
+  skillIndex0: Types.i32,
+  skillIndex1: Types.i32,
+  skillIndex2: Types.i32,
+  skillIndex3: Types.i32,
+  cd0: Types.f32,
+  cd1: Types.f32,
+  cd2: Types.f32,
+  cd3: Types.f32,
+  cdMax0: Types.f32,
+  cdMax1: Types.f32,
+  cdMax2: Types.f32,
+  cdMax3: Types.f32,
+});
+
+/**
+ * StatusEffect — applied to entities hit by elemental skills.
+ * One component holds up to 4 simultaneous effects (one per type).
+ *   type:    0 = none, 1 = burn, 2 = slow, 3 = shock, 4 = drain
+ *   timer:   seconds remaining
+ *   magnitude: per-type meaning (dmg/sec, slow multiplier, etc.)
+ */
+export const StatusEffect = defineComponent({
+  type0: Types.ui8, type1: Types.ui8, type2: Types.ui8, type3: Types.ui8,
+  timer0: Types.f32, timer1: Types.f32, timer2: Types.f32, timer3: Types.f32,
+  mag0: Types.f32, mag1: Types.f32, mag2: Types.f32, mag3: Types.f32,
+});
+
+/**
+ * Beam — instant line damage marker. Lives for 1 frame visually but the
+ * damage is applied immediately on spawn. The renderer reads this to draw
+ * a brief beam effect.
+ */
+export const Beam = defineComponent({
+  startX: Types.f32,
+  startY: Types.f32,
+  endX: Types.f32,
+  endY: Types.f32,
+  color: Types.ui32,
+  age: Types.f32,
+  ttl: Types.f32,
+});
+
+/**
+ * NovaRing — expanding ring effect. Reads radius from Projectile.radius
+ * (reused). Has its own component so the renderer can draw it differently.
+ */
+export const NovaRing = defineComponent({
+  maxRadius: Types.f32,
+  currentRadius: Types.f32,
+  expandSpeed: Types.f32,
+  color: Types.ui32,
+  teamId: Types.ui8,
+  damage: Types.f32,
+  /** Enemies already hit by this nova — prevents multi-hit on same frame. */
+  hitCount: Types.ui8,
 });
 
 export type World = IWorld;

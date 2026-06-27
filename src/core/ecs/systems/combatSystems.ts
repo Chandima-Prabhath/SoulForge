@@ -238,7 +238,7 @@ export function collisionSystem() {
 // Combat System — handles death cleanup and essence drops
 // ─────────────────────────────────────────────────────────────────────────────
 
-function handleDeath(eid: number) {
+export function handleDeath(eid: number) {
   // Drop an essence shard at the death location
   if (hasComponent(world, Position, eid)) {
     spawnEssenceShard(Position.x[eid], Position.y[eid], 1);
@@ -282,7 +282,7 @@ export function cleanupDeadEntities() {
 // Damage Number spawning
 // ─────────────────────────────────────────────────────────────────────────────
 
-function spawnDamageNumber(
+export function spawnDamageNumber(
   x: number,
   y: number,
   value: number,
