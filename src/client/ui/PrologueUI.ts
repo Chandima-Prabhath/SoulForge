@@ -84,16 +84,35 @@ export class PrologueUI {
       font-size: 11px;
       letter-spacing: 0.1em;
       font-family: -apple-system, sans-serif;
+      pointer-events: none;
     `;
-    hint.textContent = "click to continue";
+    hint.textContent = "click / space / enter to continue";
 
     this.container.appendChild(inner);
     this.container.appendChild(hint);
     document.body.appendChild(this.container);
 
-    // Click to advance
-    this.container.addEventListener("click", () => this.advance());
+    // Click to advance (preventDefault to avoid text selection)
+    this.container.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      this.advance();
+    });
+    this.container.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      this.advance();
+    });
+
+    // Keyboard: Space / Enter to advance
+    this.keydownHandler = (e: KeyboardEvent) => {
+      if (e.key === " " || e.key === "Enter") {
+        e.preventDefault();
+        this.advance();
+      }
+    };
+    window.addEventListener("keydown", this.keydownHandler);
   }
+
+  private keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
   /**
    * Start the prologue sequence.
@@ -166,6 +185,12 @@ export class PrologueUI {
     this.isActive = false;
     this.textEl.style.opacity = "0";
     this.speakerEl.style.opacity = "0";
+
+    // Remove keyboard listener
+    if (this.keydownHandler) {
+      window.removeEventListener("keydown", this.keydownHandler);
+      this.keydownHandler = null;
+    }
 
     setTimeout(() => {
       this.container.style.opacity = "0";

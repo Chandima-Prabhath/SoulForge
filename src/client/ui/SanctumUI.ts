@@ -47,6 +47,8 @@ export class SanctumUI {
   private synthSkillA: number = -1;
   private synthSkillB: number = -1;
 
+  private contentEl: HTMLElement;
+
   constructor(runState: RunState, onDescend: () => void) {
     this.runState = runState;
     this.onDescendCallback = onDescend;
@@ -55,15 +57,84 @@ export class SanctumUI {
     this.container.style.cssText = `
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(5, 5, 12, 0.97);
-      backdrop-filter: blur(12px);
+      background: radial-gradient(ellipse at 50% 30%, #1a0a2a 0%, #0a0510 50%, #050308 100%);
       z-index: 1000;
       display: none;
       overflow-y: auto;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: #e8e8f0;
     `;
+
+    // Add animated floating particles background
+    this.createParticlesBackground();
+
+    // Content container (above particles)
+    this.contentEl = document.createElement("div");
+    this.contentEl.style.cssText = `
+      position: relative;
+      z-index: 1;
+    `;
+    this.container.appendChild(this.contentEl);
+
     document.body.appendChild(this.container);
+  }
+
+  /**
+   * Create an animated particle background for atmospheric effect.
+   * Floating purple/gold motes that drift slowly upward.
+   */
+  private createParticlesBackground() {
+    const particleContainer = document.createElement("div");
+    particleContainer.style.cssText = `
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 0;
+    `;
+
+    const particleCount = 30;
+    for (let i = 0; i < particleCount; i++) {
+      const particle = document.createElement("div");
+      const size = 2 + Math.random() * 4;
+      const left = Math.random() * 100;
+      const duration = 15 + Math.random() * 20;
+      const delay = Math.random() * -duration;
+      const opacity = 0.1 + Math.random() * 0.3;
+      const color = Math.random() > 0.5 ? "#d0a0ff" : "#ffb86c";
+
+      particle.style.cssText = `
+        position: absolute;
+        width: ${size}px;
+        height: ${size}px;
+        background: ${color};
+        border-radius: 50%;
+        left: ${left}%;
+        bottom: -10px;
+        opacity: ${opacity};
+        box-shadow: 0 0 ${size * 2}px ${color};
+        animation: floatUp ${duration}s linear infinite;
+        animation-delay: ${delay}s;
+      `;
+      particleContainer.appendChild(particle);
+    }
+
+    // Add the keyframe animation to the document
+    if (!document.getElementById("sanctum-particle-style")) {
+      const style = document.createElement("style");
+      style.id = "sanctum-particle-style";
+      style.textContent = `
+        @keyframes floatUp {
+          0% { transform: translateY(0) translateX(0); opacity: 0; }
+          10% { opacity: 0.3; }
+          90% { opacity: 0.3; }
+          100% { transform: translateY(-110vh) translateX(${Math.random() > 0.5 ? "20" : "-20"}px); opacity: 0; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    this.container.appendChild(particleContainer);
   }
 
   show() {
@@ -106,7 +177,7 @@ export class SanctumUI {
     const dp = this.runState.devourProgress;
     const sageDialogue = this.getSageDialogue();
 
-    this.container.innerHTML = `
+    this.contentEl.innerHTML = `
       <div style="max-width: 700px; margin: 0 auto; padding: 40px 20px; min-height: 100vh; display: flex; flex-direction: column; justify-content: center;">
 
         <!-- Header -->
@@ -293,7 +364,7 @@ export class SanctumUI {
 
   private attachMainListeners() {
     // Action buttons
-    const buttons = this.container.querySelectorAll(".action-btn");
+    const buttons = this.contentEl.querySelectorAll(".action-btn");
     buttons.forEach((btn) => {
       btn.addEventListener("click", (e) => {
         const target = (e.currentTarget as HTMLElement);
@@ -328,7 +399,7 @@ export class SanctumUI {
 
   private renderCraft() {
     const dp = this.runState.devourProgress;
-    this.container.innerHTML = `
+    this.contentEl.innerHTML = `
       <div style="max-width: 600px; margin: 0 auto; padding: 30px 20px;">
         ${this.renderBackButton()}
 
@@ -517,7 +588,7 @@ export class SanctumUI {
     }
 
     // Atom buttons
-    const atomButtons = this.container.querySelectorAll(".atom-btn");
+    const atomButtons = this.contentEl.querySelectorAll(".atom-btn");
     atomButtons.forEach((btn) => {
       btn.addEventListener("click", (e) => {
         let el = e.target as HTMLElement;
@@ -640,7 +711,7 @@ export class SanctumUI {
       `;
     }
 
-    this.container.innerHTML = `
+    this.contentEl.innerHTML = `
       <div style="max-width: 600px; margin: 0 auto; padding: 30px 20px;">
         ${this.renderBackButton()}
 
@@ -808,7 +879,7 @@ export class SanctumUI {
       `;
     }).join("");
 
-    this.container.innerHTML = `
+    this.contentEl.innerHTML = `
       <div style="max-width: 600px; margin: 0 auto; padding: 30px 20px;">
         ${this.renderBackButton()}
 
@@ -865,7 +936,7 @@ export class SanctumUI {
       `;
     }).join("");
 
-    this.container.innerHTML = `
+    this.contentEl.innerHTML = `
       <div style="max-width: 600px; margin: 0 auto; padding: 30px 20px;">
         ${this.renderBackButton()}
 
@@ -888,7 +959,7 @@ export class SanctumUI {
       });
     }
 
-    const equipSelects = this.container.querySelectorAll(".equip-select");
+    const equipSelects = this.contentEl.querySelectorAll(".equip-select");
     equipSelects.forEach((sel) => {
       sel.addEventListener("change", (e) => {
         const target = e.target as HTMLSelectElement;
