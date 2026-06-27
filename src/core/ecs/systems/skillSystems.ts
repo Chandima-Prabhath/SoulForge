@@ -235,8 +235,8 @@ function spawnBeamCast(
     const dy = cast.targetY - py;
     const dist = Math.hypot(dx, dy);
     if (dist < 1) return;
-    // Beam range is 4× the projectile lifetime × speed, capped at 600px
-    const range = Math.min(600, stats.lifetime > 0 ? stats.speed * stats.lifetime * 4 : 600);
+    // Beam range — fixed 350px (no element should reach across the whole map)
+    const range = 350;
     endX = px + (dx / dist) * range;
     endY = py + (dy / dist) * range;
   }

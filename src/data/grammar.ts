@@ -125,8 +125,8 @@ export const FORMS: Record<FormId, FormDef> = {
     id: 2,
     name: "Nova",
     baseDamage: 28,
-    baseSpeed: 280, // expansion speed
-    baseRadius: 110, // max radius
+    baseSpeed: 360, // expansion speed
+    baseRadius: 140, // max radius
     baseCooldown: 2.0,
     baseLifetime: 0.4, // time to fully expand
     flavor: "An expanding ring of energy emanating from the caster.",
