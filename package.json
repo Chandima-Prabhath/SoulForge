@@ -1,0 +1,24 @@
+{
+  "name": "soulforge",
+  "version": "0.0.1",
+  "description": "An anime-style isometric action RPG with compositional skill grammar and roguelite realms.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bitecs": "^0.3.40",
+    "howler": "^2.2.4",
+    "pixi.js": "^8.6.6",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}
