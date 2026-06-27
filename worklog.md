@@ -473,3 +473,37 @@ Next Phase (Phase 5 — Sanctum Hub):
 - Grimoire: view all discovered skills, name them, share codes
 - Skill crafting: pick atoms → preview → equip to slots
 - NPC dialogue: Voice of the World guide
+
+---
+Task ID: phase-5-sanctum-hub
+Agent: main
+Task: Build Phase 5 Sanctum Hub — skill crafting, synthesis, grimoire, equip UI between realm runs.
+
+Work Log:
+- Created src/client/ui/SanctumUI.ts (~650 lines) — full DOM overlay with:
+  - Craft Skill section: atom buttons (Element/Form/Vector/Modifier), live preview, name input, Forge button
+  - Synthesize section: pick 2 skills, merge Element from A + Form from B + modifiers, preview, name, synthesize
+  - Grimoire section: lists all owned skills with stats + composition
+  - Equip section: 4 dropdowns for skill slots
+  - Descend button: closes Sanctum, generates new realm
+- Extended RunState with: ownedSkills, equippedSkillIndices, mode
+- Added addCraftedSkill(), equipSkill(), synthesizeSkills() helpers to runState.ts
+- Updated skillSystems.ts: playerSkillStatsCache is now 'let', rebuildSkillStatsCache() exported, getSkillStats() recomputes on-the-fly, spawnPlayerWithSkills() takes optional equippedIndices
+- Updated GameApp: SanctumUI initialized in init(), on death → show Sanctum, descendFromSanctum() syncs skills + generates realm, game loop pauses while Sanctum visible
+- Fixed critical bug: ElementId 0 (Force) is falsy in JS, so !this.craftElement was true even when Force was selected. Changed to === null check.
+- Fixed RunState reference issue: advanceRunOnDeath creates a new object, but SanctumUI held reference to old one. Added updateRunState() method.
+
+Stage Summary:
+- Sanctum opens on death (or debug R key)
+- Crafting works: select atoms → live preview (damage, cooldown, speed, radius) → forge → skill added to grimoire
+- Verified: crafted 'Test Bolt' (Force+Projectile+Ranged), grimoire 8→9, console confirms
+- Synthesis UI functional (select 2 skills → preview synthesized result)
+- Equip UI functional (dropdowns for 4 slots)
+- Owned skills + equipped indices persist in RunState across death
+- 0 JS errors, production build 354KB (110KB gzipped)
+
+Files produced:
+- NEW: src/client/ui/SanctumUI.ts (~650 lines)
+- MODIFIED: src/core/realm/runState.ts (ownedSkills, equippedSkillIndices, mode, synthesis)
+- MODIFIED: src/core/ecs/systems/skillSystems.ts (dynamic stats cache, equippedIndices param)
+- MODIFIED: src/client/GameApp.ts (Sanctum integration, death→sanctum flow)
