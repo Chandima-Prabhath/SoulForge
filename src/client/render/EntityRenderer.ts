@@ -6,13 +6,15 @@
  *
  * Sprite ID registry:
  *   0 = player character
- *   1 = mana bolt projectile
+ *   1 = projectile (color comes from Projectile.color — element-driven)
  *   2 = damage number (Pixi Text)
  *   3 = essence shard
  *   4 = enemy slime
+ *   5 = nova ring (reads NovaRing component for radius/color)
  *
  * For entities with Health, a small health bar is rendered above the sprite.
  * For damage numbers, a Pixi Text shows the damage value and fades with age.
+ * For entities with Beam, a line is drawn from start to end with element color.
  */
 
 import { Container, Graphics, Text, TextStyle } from "pixi.js";
@@ -25,21 +27,24 @@ import {
   DamageNumber,
   Team,
   Lifetime,
+  Projectile,
+  Beam,
+  NovaRing,
 } from "@core/ecs/world";
 
 const spriteQuery = defineQuery([Position, Sprite]);
+const beamQuery = defineQuery([Beam]);
+const novaQuery = defineQuery([NovaRing, Position]);
 
 interface SpriteEntry {
   display: Container;
   zLayer: number;
-  // Optional health bar reference for entities with Health
   healthBar?: Graphics;
-  // Optional text reference for damage numbers
   text?: Text;
-  // Track last spriteId so we rebuild if it changes
   spriteId: number;
-  // Track team for tinting
   teamId: number;
+  // For projectiles — store element color so we can rebuild if it changes
+  elementColor: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -119,22 +124,28 @@ function buildEnemySprite(): Container {
   return c;
 }
 
-function buildManaBoltSprite(): Container {
+/**
+ * Build a projectile sprite with the element's color.
+ * Phase 2: 3 concentric circles (outer glow, mid, core) tinted by element.
+ */
+function buildProjectileSprite(color: number, accentColor: number): Container {
   const c = new Container();
-  c.label = "ManaBolt";
+  c.label = "Projectile";
 
   const g = new Graphics();
   // Outer glow
   g.circle(0, 0, 12);
-  g.fill({ color: 0x8a4af0, alpha: 0.25 });
+  g.fill({ color, alpha: 0.25 });
   // Mid glow
   g.circle(0, 0, 7);
-  g.fill({ color: 0xb070ff, alpha: 0.5 });
+  g.fill({ color, alpha: 0.5 });
   // Core
   g.circle(0, 0, 4);
-  g.fill({ color: 0xe0c8ff });
+  g.fill({ color: accentColor });
   c.addChild(g);
 
+  // Store colors for pulse animation
+  c.label = `Projectile:${color.toString(16)}`;
   return c;
 }
 
@@ -161,11 +172,9 @@ function buildEssenceShardSprite(): Container {
 
 function buildHealthBar(width = 32): Graphics {
   const g = new Graphics();
-  // Background
   g.roundRect(-width / 2, 0, width, 4, 1);
   g.fill({ color: 0x000000, alpha: 0.6 });
   g.stroke({ color: 0x000000, alpha: 0.8, width: 0.5 });
-  // Foreground (full red — will be redrawn each frame based on health)
   g.roundRect(-width / 2 + 0.5, 0.5, width - 1, 3, 1);
   g.fill({ color: 0xff4040 });
   return g;
@@ -192,25 +201,38 @@ export class EntityRenderer {
   readonly container: Container;
   private sprites: Map<number, SpriteEntry> = new Map();
 
+  // Beam VFX — separate from sprites because they don't have Position-driven movement
+  private beamGraphics: Map<number, Graphics> = new Map();
+
+  // Nova ring VFX — one Graphics per nova, redrawn each frame as it expands
+  private novaGraphics: Map<number, Graphics> = new Map();
+
   constructor() {
     this.container = new Container();
     this.container.label = "Entities";
   }
 
-  private buildDisplayFor(spriteId: number): { display: Container; isText?: boolean } {
+  private buildDisplayFor(
+    spriteId: number,
+    elementColor: number = 0xe0e0e8,
+    accentColor: number = 0xffffff
+  ): { display: Container; isText?: boolean } {
     switch (spriteId) {
       case 0:
         return { display: buildPlayerSprite() };
       case 1:
-        return { display: buildManaBoltSprite() };
+        return { display: buildProjectileSprite(elementColor, accentColor) };
       case 2:
         return { display: buildDamageNumberText(), isText: true };
       case 3:
         return { display: buildEssenceShardSprite() };
       case 4:
         return { display: buildEnemySprite() };
+      case 5:
+        // Nova ring — placeholder container, drawn dynamically in sync()
+        return { display: new Graphics() };
       default:
-        return { display: buildManaBoltSprite() }; // fallback
+        return { display: buildProjectileSprite(elementColor, accentColor) };
     }
   }
 
@@ -225,9 +247,15 @@ export class EntityRenderer {
       const eid = entities[i];
       const spriteId = Sprite.spriteId[eid];
       const teamId = hasComponent(world, Team, eid) ? Team.id[eid] : -1;
+      const elementColor = hasComponent(world, Projectile, eid)
+        ? Projectile.color[eid]
+        : 0xe0e0e8;
+      const accentColor = hasComponent(world, Projectile, eid)
+        ? Projectile.accentColor[eid]
+        : 0xffffff;
 
       if (!this.sprites.has(eid)) {
-        const { display, isText } = this.buildDisplayFor(spriteId);
+        const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor);
         display.zIndex = Sprite.zLayer[eid];
 
         const entry: SpriteEntry = {
@@ -235,6 +263,7 @@ export class EntityRenderer {
           zLayer: Sprite.zLayer[eid],
           spriteId,
           teamId,
+          elementColor,
         };
 
         if (isText) {
@@ -252,15 +281,16 @@ export class EntityRenderer {
         this.container.addChild(display);
         this.sprites.set(eid, entry);
       } else {
-        // Sprite ID changed — rebuild (rare, but safe)
         const entry = this.sprites.get(eid)!;
-        if (entry.spriteId !== spriteId) {
+        // Sprite ID or element color changed — rebuild
+        if (entry.spriteId !== spriteId || (spriteId === 1 && entry.elementColor !== elementColor)) {
           this.container.removeChild(entry.display);
           entry.display.destroy();
-          const { display, isText } = this.buildDisplayFor(spriteId);
+          const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor);
           display.zIndex = Sprite.zLayer[eid];
           entry.display = display;
           entry.spriteId = spriteId;
+          entry.elementColor = elementColor;
           entry.text = isText ? (display as Text) : undefined;
           if (hasComponent(world, Health, eid)) {
             const bar = buildHealthBar(32);
@@ -275,7 +305,7 @@ export class EntityRenderer {
       }
     }
 
-    // Remove deleted entities — bitecs recycles IDs, so we check current set
+    // Remove deleted entities
     const currentSet = new Set(entities);
     for (const [eid, entry] of this.sprites.entries()) {
       if (!currentSet.has(eid)) {
@@ -294,7 +324,6 @@ export class EntityRenderer {
       // Update health bar
       if (entry.healthBar && hasComponent(world, Health, eid)) {
         const ratio = Health.current[eid] / Health.max[eid];
-        // Redraw the foreground (simplest approach: clear and redraw)
         entry.healthBar.clear();
         const w = 32;
         entry.healthBar.roundRect(-w / 2, 0, w, 4, 1);
@@ -303,33 +332,30 @@ export class EntityRenderer {
         const fgWidth = Math.max(0, (w - 1) * ratio);
         if (fgWidth > 0) {
           entry.healthBar.roundRect(-w / 2 + 0.5, 0.5, fgWidth, 3, 1);
-          // Color shifts: green (full) → yellow (half) → red (low)
           let color = 0x40ff40;
           if (ratio < 0.5) color = 0xffe040;
           if (ratio < 0.25) color = 0xff4040;
           entry.healthBar.fill({ color });
         }
-        // Position the health bar above the sprite
         entry.healthBar.y = -36;
         entry.healthBar.x = 0;
       }
 
-      // Update damage number text + fade with age
+      // Update damage number text + fade
       if (entry.text && hasComponent(world, DamageNumber, eid)) {
         const val = Math.round(DamageNumber.value[eid]);
         entry.text.text = val > 0 ? String(val) : "✦";
         const age = DamageNumber.age[eid];
         const ttl = DamageNumber.ttl[eid];
         const t = age / ttl;
-        entry.text.alpha = 1 - t * t; // ease-out fade
-        entry.text.scale.set(1 + t * 0.3); // slight grow
+        entry.text.alpha = 1 - t * t;
+        entry.text.scale.set(1 + t * 0.3);
       }
 
       // Fade out essence shards near end of lifetime
       if (hasComponent(world, Lifetime, eid) && entry.spriteId === 3) {
         const remaining = Lifetime.remaining[eid];
         if (remaining < 2) {
-          // Pulse + fade
           const pulse = 0.5 + 0.5 * Math.sin(remaining * 12);
           disp.alpha = (remaining / 2) * (0.5 + 0.5 * pulse);
         } else {
@@ -337,14 +363,119 @@ export class EntityRenderer {
         }
       }
 
-      // Pulse mana bolt projectiles
+      // Pulse projectiles
       if (entry.spriteId === 1) {
         const t = performance.now() / 100;
         disp.scale.set(0.9 + 0.15 * Math.sin(t));
       }
     }
 
-    // Sort by Y (depth) so closer-to-camera sprites render in front
+    // ── Beam VFX ───────────────────────────────────────────────────────
+    this.syncBeams();
+
+    // ── Nova ring VFX ──────────────────────────────────────────────────
+    this.syncNovas();
+
+    // Sort by Y (depth)
     this.container.children.sort((a, b) => a.y - b.y);
+  }
+
+  /**
+   * Sync beam VFX. Beams are short-lived line effects (0.15s).
+   */
+  private syncBeams() {
+    const beams = beamQuery(world);
+    const currentSet = new Set(beams);
+
+    // Remove deleted beams
+    for (const [eid, gfx] of this.beamGraphics.entries()) {
+      if (!currentSet.has(eid)) {
+        this.container.removeChild(gfx);
+        gfx.destroy();
+        this.beamGraphics.delete(eid);
+      }
+    }
+
+    // Add or update beams
+    for (let i = 0; i < beams.length; i++) {
+      const eid = beams[i];
+      let gfx = this.beamGraphics.get(eid);
+      if (!gfx) {
+        gfx = new Graphics();
+        gfx.zIndex = 3;
+        this.container.addChild(gfx);
+        this.beamGraphics.set(eid, gfx);
+      }
+
+      const startX = Beam.startX[eid];
+      const startY = Beam.startY[eid];
+      const endX = Beam.endX[eid];
+      const endY = Beam.endY[eid];
+      const color = Beam.color[eid];
+      const age = Beam.age[eid];
+      const ttl = Beam.ttl[eid];
+      const t = age / ttl;
+
+      gfx.clear();
+      // Outer glow
+      gfx.moveTo(startX, startY);
+      gfx.lineTo(endX, endY);
+      gfx.stroke({ color, width: 14, alpha: (1 - t) * 0.3 });
+      // Mid
+      gfx.moveTo(startX, startY);
+      gfx.lineTo(endX, endY);
+      gfx.stroke({ color, width: 6, alpha: (1 - t) * 0.7 });
+      // Core
+      gfx.moveTo(startX, startY);
+      gfx.lineTo(endX, endY);
+      gfx.stroke({ color: 0xffffff, width: 2, alpha: 1 - t });
+    }
+  }
+
+  /**
+   * Sync nova ring VFX. Each nova is drawn as an expanding ring.
+   */
+  private syncNovas() {
+    const novas = novaQuery(world);
+    const currentSet = new Set(novas);
+
+    // Remove deleted novas
+    for (const [eid, gfx] of this.novaGraphics.entries()) {
+      if (!currentSet.has(eid)) {
+        this.container.removeChild(gfx);
+        gfx.destroy();
+        this.novaGraphics.delete(eid);
+      }
+    }
+
+    // Add or update novas
+    for (let i = 0; i < novas.length; i++) {
+      const eid = novas[i];
+      let gfx = this.novaGraphics.get(eid);
+      if (!gfx) {
+        gfx = new Graphics();
+        gfx.zIndex = 3;
+        this.container.addChild(gfx);
+        this.novaGraphics.set(eid, gfx);
+      }
+
+      const cx = Position.x[eid];
+      const cy = Position.y[eid];
+      const r = NovaRing.currentRadius[eid];
+      const maxR = NovaRing.maxRadius[eid];
+      const color = NovaRing.color[eid];
+      const fadeT = Math.min(1, r / maxR);
+
+      gfx.clear();
+      // Outer glow ring
+      gfx.circle(cx, cy, r);
+      gfx.stroke({ color, width: 12, alpha: (1 - fadeT) * 0.3 });
+      // Mid ring
+      gfx.circle(cx, cy, r);
+      gfx.stroke({ color, width: 5, alpha: (1 - fadeT) * 0.7 });
+      // Inner core ring
+      gfx.circle(cx, cy, r);
+      gfx.stroke({ color: 0xffffff, width: 1.5, alpha: 1 - fadeT });
+    }
   }
 }

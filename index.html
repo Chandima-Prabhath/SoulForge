@@ -78,7 +78,7 @@
     <div id="app">
       <div id="loading">Summoning the Sanctum...</div>
       <div id="hud" style="display:none;">
-        <div class="hud-title">SOULFORGE — Phase 1</div>
+        <div class="hud-title">SOULFORGE — Phase 2</div>
         <div class="hud-row"><span class="hud-label">Realm</span><span class="hud-value" id="hud-realm">Verdant Rift (Prototype)</span></div>
         <div class="hud-row"><span class="hud-label">FPS</span><span class="hud-value" id="hud-fps">--</span></div>
         <div class="hud-row"><span class="hud-label">Tile</span><span class="hud-value" id="hud-tile">--, --</span></div>
@@ -87,14 +87,50 @@
         <div style="margin-top:2px; width:100%; height:6px; background:#222230; border-radius:3px; overflow:hidden;">
           <div id="hud-hp-bar" style="width:100%; height:100%; background:#40ff40; transition: width 0.15s;"></div>
         </div>
-        <div class="hud-row" style="margin-top:4px;"><span class="hud-label">Mana Bolt</span><span class="hud-value" id="hud-cd">--</span></div>
-        <div style="margin-top:2px; width:100%; height:4px; background:#222230; border-radius:2px; overflow:hidden;">
-          <div id="hud-cd-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
+        <div style="margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.08);">
+          <div style="font-size:10px; color:#8888a0; letter-spacing:0.05em; margin-bottom:4px;">SKILLS</div>
+          <div id="hud-slot0" style="margin-bottom:4px;">
+            <div class="hud-row">
+              <span class="hud-value" style="font-size:11px;"><span id="hud-slot0-key" style="color:#ffb86c; font-weight:bold;">1</span> <span id="hud-slot0-name">--</span></span>
+              <span class="hud-value" style="font-size:11px;" id="hud-slot0-cd">--</span>
+            </div>
+            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
+              <div id="hud-slot0-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
+            </div>
+          </div>
+          <div id="hud-slot1" style="margin-bottom:4px;">
+            <div class="hud-row">
+              <span class="hud-value" style="font-size:11px;"><span id="hud-slot1-key" style="color:#ffb86c; font-weight:bold;">2</span> <span id="hud-slot1-name">--</span></span>
+              <span class="hud-value" style="font-size:11px;" id="hud-slot1-cd">--</span>
+            </div>
+            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
+              <div id="hud-slot1-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
+            </div>
+          </div>
+          <div id="hud-slot2" style="margin-bottom:4px;">
+            <div class="hud-row">
+              <span class="hud-value" style="font-size:11px;"><span id="hud-slot2-key" style="color:#ffb86c; font-weight:bold;">3</span> <span id="hud-slot2-name">--</span></span>
+              <span class="hud-value" style="font-size:11px;" id="hud-slot2-cd">--</span>
+            </div>
+            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
+              <div id="hud-slot2-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
+            </div>
+          </div>
+          <div id="hud-slot3" style="margin-bottom:4px;">
+            <div class="hud-row">
+              <span class="hud-value" style="font-size:11px;"><span id="hud-slot3-key" style="color:#ffb86c; font-weight:bold;">4</span> <span id="hud-slot3-name">--</span></span>
+              <span class="hud-value" style="font-size:11px;" id="hud-slot3-cd">--</span>
+            </div>
+            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
+              <div id="hud-slot3-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
+            </div>
+          </div>
         </div>
-        <div class="hud-row" style="margin-top:4px;"><span class="hud-label">Enemies</span><span class="hud-value" id="hud-enemies">--</span></div>
+        <div class="hud-row" style="margin-top:6px;"><span class="hud-label">Enemies</span><span class="hud-value" id="hud-enemies">--</span></div>
         <div class="hud-help" style="margin-top:6px;">
           WASD: move &nbsp;|&nbsp; L-click: walk<br>
-          R-click: cast Mana Bolt &nbsp;|&nbsp; R: respawn
+          R-click: cast slot 1 &nbsp;|&nbsp; 1-4: cast slots<br>
+          R: respawn
         </div>
       </div>
     </div>

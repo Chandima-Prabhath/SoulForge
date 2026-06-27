@@ -1,12 +1,14 @@
 /**
  * InputManager — keyboard + mouse input for the client.
  *
- * Reads raw browser events and translates them into ECS state writes:
- *  - WASD/arrows → Velocity on the player entity (overrides click-to-move)
- *  - Left-click on the map → MoveTarget (walk-to-point)
- *  - Right-click on the map → CastRequest (cast Mana Bolt toward point)
+ * Phase 2 controls:
+ *   WASD / Arrows — movement
+ *   Left-click    — walk-to-point
+ *   Right-click   — cast slot 0 (basic attack = Mana Bolt) toward point
+ *   1, 2, 3, 4    — cast skill slots 0..3 toward mouse position
+ *   R             — respawn (after death)
  *
- * The cast request is read by GameApp each frame and passed to attackSystem.
+ * The cast request is read by GameApp each frame and passed to castSkillSystem.
  *
  * This module writes to ECS components, but it does NOT read from Pixi.
  * The camera-to-screen transform is provided by a callback so this stays
@@ -21,18 +23,43 @@ import {
   PlayerTag,
   MoveTarget,
 } from "@core/ecs/world";
-import type { CastRequest } from "@core/ecs/systems/combatSystems";
 
 const playerQuery = defineQuery([Position, Velocity, PlayerTag]);
 
 const SPEED = 180; // px/sec — must match movementSystem's MOVEMENT_SPEED
 
+/**
+ * A skill cast request. GameApp reads these each frame and feeds them to
+ * castSkillSystem. Only ONE cast can happen per frame (the highest-priority
+ * pending one); the rest are discarded.
+ */
+export interface SkillCastRequest {
+  /** 0..3 — which skill slot to cast. */
+  slot: number;
+  /** World-space target point. */
+  targetX: number;
+  targetY: number;
+  /** Whether the cast is actually requested this frame. */
+  active: boolean;
+}
+
 export class InputManager {
   private keys: Set<string> = new Set();
   private screenToWorldFn: (sx: number, sy: number) => { x: number; y: number };
 
-  // Cast request — read and cleared by GameApp each frame
-  private pendingCast: CastRequest = { active: false, x: 0, y: 0 };
+  // Pending cast requests — one per slot, GameApp consumes them each frame.
+  // Slot 0 (right-click) is set via onCanvasRightClick.
+  // Slots 1..3 are set via number keys 1..4.
+  private pendingCasts: SkillCastRequest[] = [
+    { slot: 0, targetX: 0, targetY: 0, active: false },
+    { slot: 1, targetX: 0, targetY: 0, active: false },
+    { slot: 2, targetX: 0, targetY: 0, active: false },
+    { slot: 3, targetX: 0, targetY: 0, active: false },
+  ];
+
+  // Last known mouse position in screen space — used to aim skill casts
+  private mouseX = 0;
+  private mouseY = 0;
 
   constructor(
     screenToWorldFn: (sx: number, sy: number) => { x: number; y: number }
@@ -46,6 +73,7 @@ export class InputManager {
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.onBlur);
     window.addEventListener("contextmenu", this.onContextMenu);
+    window.addEventListener("mousemove", this.onMouseMove);
     // Click handling is delegated to the canvas via the GameApp
   }
 
@@ -68,22 +96,41 @@ export class InputManager {
 
   /**
    * Called by GameApp when the canvas is right-clicked.
-   * Sets a pending cast request that GameApp will read this frame.
+   * Sets a pending cast for slot 0 (basic attack) toward the click point.
    */
   onCanvasRightClick(sx: number, sy: number) {
     const worldPoint = this.screenToWorldFn(sx, sy);
-    this.pendingCast = { active: true, x: worldPoint.x, y: worldPoint.y };
+    this.pendingCasts[0] = {
+      slot: 0,
+      targetX: worldPoint.x,
+      targetY: worldPoint.y,
+      active: true,
+    };
   }
 
   /**
-   * Consume the pending cast request. GameApp calls this once per frame
-   * after reading the value.
+   * Consume all pending cast requests. GameApp calls this once per frame
+   * after feeding them to castSkillSystem.
+   *
+   * Returns the array (mutated in place — caller should clear active flags).
    */
-  consumeCastRequest(): CastRequest {
-    const req = this.pendingCast;
-    this.pendingCast = { active: false, x: 0, y: 0 };
-    return req;
+  consumeCastRequests(): SkillCastRequest[] {
+    return this.pendingCasts;
   }
+
+  /**
+   * Clear all pending casts. Called by GameApp after processing.
+   */
+  clearCastRequests() {
+    for (let i = 0; i < this.pendingCasts.length; i++) {
+      this.pendingCasts[i].active = false;
+    }
+  }
+
+  private onMouseMove = (e: MouseEvent) => {
+    this.mouseX = e.clientX;
+    this.mouseY = e.clientY;
+  };
 
   private onContextMenu = (e: MouseEvent) => {
     // Prevent the browser's right-click menu from showing over the canvas
@@ -96,6 +143,26 @@ export class InputManager {
       e.preventDefault();
     }
     this.keys.add(key);
+
+    // Number keys 1-4 → cast skill slots 0-3 toward mouse position
+    if (["1", "2", "3", "4"].includes(key)) {
+      const slot = parseInt(key, 10) - 1;
+      if (slot >= 0 && slot <= 3) {
+        const canvas = document.getElementById("soulforge-canvas");
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const sx = this.mouseX - rect.left;
+          const sy = this.mouseY - rect.top;
+          const worldPoint = this.screenToWorldFn(sx, sy);
+          this.pendingCasts[slot] = {
+            slot,
+            targetX: worldPoint.x,
+            targetY: worldPoint.y,
+            active: true,
+          };
+        }
+      }
+    }
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
@@ -151,5 +218,6 @@ export class InputManager {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.onBlur);
     window.removeEventListener("contextmenu", this.onContextMenu);
+    window.removeEventListener("mousemove", this.onMouseMove);
   }
 }

@@ -8,15 +8,16 @@
  *  - InputManager
  *  - HUD
  *
- * Main loop order (each frame):
- *   1. Read input → ECS (movement + cast request)
+ * Phase 2 main loop order (each frame):
+ *   1. Read input → ECS (movement + skill cast requests)
  *   2. Step simulation systems in dependency order:
- *      cooldown → facing → attack → projectile → collision → enemyAI →
- *      movement → damageNumber → cleanupDead → lifetime
- *   3. Update camera (reads from ECS)
- *   4. Sync renderers (reads ECS, writes Pixi display objects)
+ *      skillCooldown → castSkill → cooldown (legacy) → facing → projectile →
+ *      nova → beam → collision → enemyAI → movement → damageNumber →
+ *      statusEffect → cleanupDead → lifetime
+ *   3. Update camera
+ *   4. Sync renderers
  *   5. Update HUD
- *   6. Check for player death → respawn on R key
+ *   6. R key respawn (edge-triggered)
  */
 
 import { Application, Container } from "pixi.js";
@@ -27,7 +28,6 @@ import { InputManager } from "./input/InputManager";
 import { HUD } from "./ui/HUD";
 import { movementSystem } from "@core/ecs/systems/movementSystem";
 import {
-  attackSystem,
   cooldownSystem,
   facingSystem,
   projectileSystem,
@@ -36,10 +36,17 @@ import {
   damageNumberSystem,
   lifetimeSystem,
   cleanupDeadEntities,
-  spawnPlayerFull,
   spawnEnemy,
   clearAllEntities,
 } from "@core/ecs/systems/combatSystems";
+import {
+  castSkillSystem,
+  novaSystem,
+  beamSystem,
+  statusEffectSystem,
+  skillCooldownSystem,
+  spawnPlayerWithSkills,
+} from "@core/ecs/systems/skillSystems";
 import { tileToWorld } from "@core/iso";
 import { verdantRiftPrototype } from "@data/realms";
 
@@ -96,19 +103,17 @@ export class GameApp {
       this.app.screen.height
     );
 
-    // Input — pass a screen-to-world function bound to the camera
+    // Input
     this.input = new InputManager((sx, sy) => this.camera.screenToWorld(sx, sy));
 
-    // Click handling on the canvas — left = move, right = cast
+    // Click handling on the canvas — left = move, right = cast slot 0
     canvas.addEventListener("pointerdown", (e) => {
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       if (e.button === 2) {
-        // right click — cast
         this.input.onCanvasRightClick(sx, sy);
       } else if (e.button === 0) {
-        // left click — move
         this.input.onCanvasLeftClick(sx, sy);
       }
     });
@@ -132,7 +137,7 @@ export class GameApp {
   private spawnRealmEntities() {
     const start = verdantRiftPrototype.playerStart;
     const startWorld = tileToWorld(start.col, start.row);
-    spawnPlayerFull(startWorld.x, startWorld.y);
+    spawnPlayerWithSkills(startWorld.x, startWorld.y);
 
     for (const spawn of verdantRiftPrototype.enemySpawns) {
       const w = tileToWorld(spawn.col, spawn.row);
@@ -164,7 +169,6 @@ export class GameApp {
 
     // ── Step 1: input → ECS ────────────────────────────────────────────
     this.input.update();
-    const cast = this.input.consumeCastRequest();
 
     // R key respawn (edge-triggered so holding R doesn't spam respawns)
     if (this.input.isRPressed() && !this.rKeyHeld) {
@@ -174,15 +178,28 @@ export class GameApp {
       this.rKeyHeld = false;
     }
 
+    // Read & process all pending skill cast requests (slots 0..3)
+    const casts = this.input.consumeCastRequests();
+    for (let i = 0; i < casts.length; i++) {
+      const c = casts[i];
+      if (c.active) {
+        castSkillSystem(dt, { slot: c.slot, targetX: c.targetX, targetY: c.targetY, active: true });
+      }
+    }
+    this.input.clearCastRequests();
+
     // ── Step 2: simulation systems in dependency order ────────────────
+    skillCooldownSystem(dt);
     cooldownSystem(dt);
     facingSystem(dt);
-    attackSystem(dt, cast);
     projectileSystem(dt);
+    novaSystem(dt);
+    beamSystem(dt);
+    collisionSystem();
     enemyAISystem(dt);
     movementSystem(dt);
-    collisionSystem();
     damageNumberSystem(dt);
+    statusEffectSystem(dt);
     cleanupDeadEntities();
     lifetimeSystem();
 
