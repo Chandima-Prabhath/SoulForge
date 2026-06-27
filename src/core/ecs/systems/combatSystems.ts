@@ -42,6 +42,7 @@ import {
   EnemyAI,
   DamageNumber,
   EssenceShard,
+  StatusEffect,
 } from "../world";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,7 +168,8 @@ export function attackSystem(_dt: number, cast: CastRequest) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Projectile System — move projectiles, decay lifetime, despawn on expiry
+// Projectile System — moves projectiles only.
+// Lifetime decrement + despawn is handled by the unified lifetimeSystem().
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function projectileSystem(dt: number) {
@@ -176,7 +178,6 @@ export function projectileSystem(dt: number) {
     const eid = entities[i];
     Position.x[eid] += Velocity.x[eid] * dt;
     Position.y[eid] += Velocity.y[eid] * dt;
-    Lifetime.remaining[eid] -= dt;
   }
 }
 
@@ -350,10 +351,22 @@ function spawnEssenceShard(x: number, y: number, value: number) {
 // Lifetime System — despawns any entity whose Lifetime hit 0
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function lifetimeSystem() {
+// Lifetime System — single source of truth for Lifetime decrement + despawn.
+//
+// Every entity with a Lifetime component has its remaining time decremented here.
+// Projectiles, beams, damage numbers, essence shards, VFX — all unified.
+// Individual systems (projectileSystem, beamSystem, etc.) only mutate their own
+// domain-specific state (position, age, etc.); they do NOT touch Lifetime.
+//
+// This eliminates the previous bug where beams/damage-numbers/essence-shards
+// spawned with a Lifetime but no system decremented it, so they lived forever.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function lifetimeSystem(dt: number) {
   const entities = lifetimeQuery(world);
   for (let i = 0; i < entities.length; i++) {
     const eid = entities[i];
+    Lifetime.remaining[eid] -= dt;
     if (Lifetime.remaining[eid] <= 0) {
       removeEntity(world, eid);
     }
@@ -398,6 +411,20 @@ export function enemyAISystem(dt: number) {
     // Tick wander timer
     EnemyAI.wanderTimer[eid] -= dt;
 
+    // Compute slow multiplier from any active slow status effect.
+    // Slow magnitude is the fraction of speed retained (0.5 = 50% speed).
+    // Multiple slows don't stack — we take the strongest (lowest multiplier).
+    let speedMult = 1.0;
+    if (hasComponent(world, StatusEffect, eid)) {
+      const slowMags = [StatusEffect.mag0, StatusEffect.mag1, StatusEffect.mag2, StatusEffect.mag3];
+      const slowTypes = [StatusEffect.type0, StatusEffect.type1, StatusEffect.type2, StatusEffect.type3];
+      for (let s = 0; s < 4; s++) {
+        if (slowTypes[s][eid] === 2 && slowMags[s][eid] < speedMult) {
+          speedMult = slowMags[s][eid];
+        }
+      }
+    }
+
     switch (EnemyAI.state[eid]) {
       case 0: // idle
         // Wander
@@ -414,8 +441,8 @@ export function enemyAISystem(dt: number) {
             EnemyAI.wanderDy[eid] = 0;
           }
         }
-        Velocity.x[eid] = EnemyAI.wanderDx[eid] * ENEMY_SPEED * 0.5;
-        Velocity.y[eid] = EnemyAI.wanderDy[eid] * ENEMY_SPEED * 0.5;
+        Velocity.x[eid] = EnemyAI.wanderDx[eid] * ENEMY_SPEED * 0.5 * speedMult;
+        Velocity.y[eid] = EnemyAI.wanderDy[eid] * ENEMY_SPEED * 0.5 * speedMult;
 
         // Aggro check
         if (dist < EnemyAI.aggroRange[eid]) {
@@ -425,8 +452,8 @@ export function enemyAISystem(dt: number) {
 
       case 1: // chase
         if (dist < 1) break;
-        Velocity.x[eid] = (dx / dist) * ENEMY_SPEED;
-        Velocity.y[eid] = (dy / dist) * ENEMY_SPEED;
+        Velocity.x[eid] = (dx / dist) * ENEMY_SPEED * speedMult;
+        Velocity.y[eid] = (dy / dist) * ENEMY_SPEED * speedMult;
         if (dist < EnemyAI.attackRange[eid]) {
           EnemyAI.state[eid] = 2;
         } else if (dist > EnemyAI.aggroRange[eid] * 1.5) {

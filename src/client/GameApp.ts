@@ -201,7 +201,7 @@ export class GameApp {
     damageNumberSystem(dt);
     statusEffectSystem(dt);
     cleanupDeadEntities();
-    lifetimeSystem();
+    lifetimeSystem(dt);
 
     // ── Step 3: camera → world container ───────────────────────────────
     this.camera.update(dt);

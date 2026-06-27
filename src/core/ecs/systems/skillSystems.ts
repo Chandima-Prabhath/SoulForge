@@ -332,13 +332,30 @@ function spawnNovaCast(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Nova System — expands the ring each frame, applies damage to enemies it touches
+//
+// Each nova tracks which enemies it has already hit in a side Map, so an enemy
+// is only damaged ONCE per nova even if it stays in the annulus for multiple
+// frames as the ring expands past it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const novaEnemyQuery = defineQuery([Position, Hitbox, Health, Team, EnemyAI]);
 
+/** Map from nova entity ID → set of enemy entity IDs already hit by that nova. */
+const novaHitSets: Map<number, Set<number>> = new Map();
+
 export function novaSystem(dt: number) {
   const rings = novaQuery(world);
-  if (rings.length === 0) return;
+  if (rings.length === 0) {
+    // Clean up hit sets for novae that no longer exist
+    novaHitSets.clear();
+    return;
+  }
+
+  const ringsSet = new Set(rings);
+  // Clean up hit sets for despawned novae
+  for (const key of novaHitSets.keys()) {
+    if (!ringsSet.has(key)) novaHitSets.delete(key);
+  }
 
   const enemies = novaEnemyQuery(world);
 
@@ -353,26 +370,31 @@ export function novaSystem(dt: number) {
     const ringTeam = NovaRing.teamId[rid];
     const dmg = NovaRing.damage[rid];
 
+    // Get or create the hit set for this nova
+    let hitSet = novaHitSets.get(rid);
+    if (!hitSet) {
+      hitSet = new Set();
+      novaHitSets.set(rid, hitSet);
+    }
+
     // Damage enemies whose hitbox overlaps the ring (annulus check)
     for (let j = 0; j < enemies.length; j++) {
       const eid = enemies[j];
       if (Team.id[eid] === ringTeam) continue;
       if (Health.current[eid] <= 0) continue;
+      // Skip enemies this nova has already hit
+      if (hitSet.has(eid)) continue;
 
       const dx = Position.x[eid] - cx;
       const dy = Position.y[eid] - cy;
       const dist = Math.hypot(dx, dy);
       const hitR = Hitbox.radius[eid];
 
-      // Ring is "thick" — hit if within [r-10, r+10+hitR]
+      // Ring is "thick" — hit if within [r-12, r+12+hitR]
       if (dist >= r - 12 && dist <= r + 12 + hitR) {
-        // Simple dedup: skip if hit count exceeds enemy count threshold
-        // (Phase 2: just allow one hit per nova per enemy via flag in component)
         Health.current[eid] = Math.max(0, Health.current[eid] - dmg);
         spawnDamageNumber(Position.x[eid], Position.y[eid] - 10, dmg, false);
-        // Apply status effect from the nova's element (read from spawn-time data — not stored separately)
-        // For Phase 2 simplicity, novae apply the element's status via a stored skill index.
-        // We skip status for nova in Phase 2 to avoid bloating NovaRing.
+        hitSet.add(eid); // mark as hit so it won't be damaged again by this nova
         if (Health.current[eid] <= 0) {
           handleDeath(eid);
         }
