@@ -384,3 +384,32 @@ Next Phase (Phase 4 — First Realm Roguelite):
 - Realm boss at the end
 - Death = return to Sanctum, lose realm progress, keep unlocked atoms
 - Essence Salt: realm seed personalized by player history
+
+---
+Task ID: phase-3-polish
+Agent: main
+Task: Add Devour VFX, element-colored enemies + essence shards, reduce enemy damage for testability.
+
+Work Log:
+- Added Devour VFX: when [Devour] is cast, an expanding purple ring (sprite ID 7) appears at the player's position and fades over 0.6s. Multi-stroke: outer glow, mid ring, white core, faint inner fill.
+- Added syncDevourVfx() method to EntityRenderer with devourVfxGraphics map.
+- Reduced enemy melee damage from 8 to 5 so the player can survive long enough to test melee-range abilities.
+- Element-colored enemies: buildEnemySprite() now takes primaryColor, derives stroke + highlight. buildDisplayFor() looks up EnemyType → ENEMY_TYPES[typeId].color.
+- Element-colored essence shards: buildEssenceShardSprite() takes color, derives light/dark shades. buildDisplayFor() looks up EssenceShard.enemyTypeId → ENEMY_TYPES[typeId].color.
+- Imported EnemyType + EssenceShard + ENEMY_TYPES in EntityRenderer.
+- Updated both buildDisplayFor call sites to pass entityId.
+
+Stage Summary:
+- Devour VFX verified via VLM: "purple/violet ring/circle VFX visible around the player"
+- Enemy colors verified via VLM: "yellow, blue, and orange" enemies visible (Storm Sprite, Frost Slime, Ember Wisp)
+- Essence shards now match the element color of the enemy that dropped them
+- Player can survive longer in melee range (5 dmg per hit instead of 8)
+- 0 JS errors, production build 326KB (103KB gzipped)
+- All commits pushed to main + feat/phase-2-skill-grammar
+
+Files modified:
+- src/core/ecs/systems/devourSystems.ts (spawnDevourVfx function)
+- src/core/ecs/systems/combatSystems.ts (reduced enemy damage 8→5)
+- src/client/render/EntityRenderer.ts (colored enemies + shards + Devour VFX)
+- download/soulforge-phase3-devour-vfx-50ms.png
+- download/soulforge-phase3-colored-enemies.png
