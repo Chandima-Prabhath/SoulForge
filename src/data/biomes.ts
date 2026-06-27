@@ -55,9 +55,9 @@ export const BIOMES: Record<string, BiomeDef> = {
     },
     enemyTypeIds: [0, 1, 2], // Frost Slime, Ember Wisp, Storm Sprite
     bossTypeId: 3, // Treant Boss (defined in enemies.ts)
-    baseEnemyCount: 5,
+    baseEnemyCount: 12,
     enemyStatMultiplier: 1.0,
-    realmSize: 24,
+    realmSize: 48,
     enterFlavor: "The air hums with ancient growth. Something watches from the canopy.",
     ambientColor: 0x202030,
   },
@@ -72,10 +72,10 @@ export const BIOMES: Record<string, BiomeDef> = {
       accent: 0xff6020, // ember glow
     },
     enemyTypeIds: [1, 2, 4], // Ember Wisp, Storm Sprite, Void Shade
-    bossTypeId: 4, // Magma Wyrm
-    baseEnemyCount: 7,
+    bossTypeId: 4, // Magma Wyrm (placeholder — uses Void Shade type for now)
+    baseEnemyCount: 16,
     enemyStatMultiplier: 1.3,
-    realmSize: 26,
+    realmSize: 52,
     enterFlavor: "Heat rises from below. The walls pulse with ember-light.",
     ambientColor: 0x301810,
   },
@@ -91,9 +91,9 @@ export const BIOMES: Record<string, BiomeDef> = {
     },
     enemyTypeIds: [4, 2, 1], // Void Shade, Storm Sprite, Ember Wisp
     bossTypeId: 5, // Void Titan
-    baseEnemyCount: 9,
+    baseEnemyCount: 20,
     enemyStatMultiplier: 1.6,
-    realmSize: 28,
+    realmSize: 56,
     enterFlavor: "Reality frays at the edges. The void stares back.",
     ambientColor: 0x100820,
   },

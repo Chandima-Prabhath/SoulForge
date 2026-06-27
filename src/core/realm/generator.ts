@@ -65,7 +65,8 @@ export function generateRealm(
   const playerStart = findWalkableTile(tiles, size, 2, 2, rng);
 
   // Generate enemy spawns (spread across the map, away from player start)
-  const enemyCount = Math.floor(biome.baseEnemyCount + depth * 0.5);
+  // Scale enemy count with depth (more enemies deeper)
+  const enemyCount = Math.floor(biome.baseEnemyCount + depth * 1.5);
   const enemySpawns = generateEnemySpawns(
     tiles, size, playerStart, enemyCount, rng
   );
@@ -94,16 +95,18 @@ export function generateRealm(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Generate a tilemap with:
+ * Generate a tilemap with multiple zones and explorable areas:
  *   - A border of rocks (walls)
- *   - Random rock clusters (obstacles)
- *   - A water/lava pond
- *   - A diagonal path from player start toward center
- *   - A boss arena (clear area in center-bottom)
+ *   - A main path from player start (top-left) to boss arena (bottom-center)
+ *   - Branching paths to side areas
+ *   - Multiple rock clusters (obstacles creating natural chokepoints)
+ *   - 2-3 ponds (water/lava/void fluid)
+ *   - Clearings (open areas for combat)
+ *   - A boss arena (large circular area at the bottom)
  *
  * Tile codes:
  *   0 = grass (walkable)
- *   1 = path (walkable)
+ *   1 = path (walkable — main routes)
  *   2 = rock (obstacle)
  *   3 = water (obstacle)
  *   4 = accent (boss arena floor — visual only)
@@ -123,55 +126,123 @@ function generateTiles(
     tiles[i * size + (size - 1)] = 2;   // right col
   }
 
-  // Random rock clusters (3-5 clusters)
-  const rockClusterCount = 3 + Math.floor(rng() * 3);
-  for (let c = 0; c < rockClusterCount; c++) {
-    const cx = 2 + Math.floor(rng() * (size - 4));
-    const cy = 2 + Math.floor(rng() * (size - 4));
-    const clusterSize = 2 + Math.floor(rng() * 3);
-    for (let i = 0; i < clusterSize; i++) {
-      const dx = Math.floor((rng() - 0.5) * 4);
-      const dy = Math.floor((rng() - 0.5) * 4);
-      const x = cx + dx;
-      const y = cy + dy;
+  // ── Main path: L-shaped from top-left to bottom-center ──────────────
+  // Vertical segment (down the left side, then right to center)
+  const pathWidth = 2;
+  const vertPathX = Math.floor(size * 0.25);
+  const horizPathY = Math.floor(size * 0.75);
+  for (let y = 2; y < horizPathY; y++) {
+    for (let dx = 0; dx < pathWidth; dx++) {
+      const x = vertPathX + dx;
+      if (x > 1 && x < size - 2 && y > 1) {
+        tiles[y * size + x] = 1;
+      }
+    }
+  }
+  // Horizontal segment (across to center-bottom)
+  for (let x = vertPathX; x < Math.floor(size / 2) + 3; x++) {
+    for (let dy = 0; dy < pathWidth; dy++) {
+      const y = horizPathY + dy;
       if (x > 1 && x < size - 2 && y > 1 && y < size - 2) {
-        tiles[y * size + x] = 2;
+        tiles[y * size + x] = 1;
       }
     }
   }
 
-  // A pond (water/lava)
-  const pondCx = 4 + Math.floor(rng() * (size - 8));
-  const pondCy = 4 + Math.floor(rng() * (size - 8));
-  const pondRadius = 2 + Math.floor(rng() * 2);
-  for (let y = pondCy - pondRadius; y <= pondCy + pondRadius; y++) {
-    for (let x = pondCx - pondRadius; x <= pondCx + pondRadius; x++) {
-      if (x > 1 && x < size - 2 && y > 1 && y < size - 2) {
-        const dx = x - pondCx;
-        const dy = y - pondCy;
-        if (dx * dx + dy * dy <= pondRadius * pondRadius) {
-          tiles[y * size + x] = 3;
+  // ── Branching paths (2-3 side paths to exploration areas) ──────────
+  const branchCount = 2 + Math.floor(rng() * 2);
+  for (let b = 0; b < branchCount; b++) {
+    const startX = 3 + Math.floor(rng() * (size - 6));
+    const startY = 3 + Math.floor(rng() * (size - 6));
+    const length = 5 + Math.floor(rng() * 8);
+    const direction = Math.floor(rng() * 4);
+    for (let i = 0; i < length; i++) {
+      let x = startX, y = startY;
+      switch (direction) {
+        case 0: y -= i; break; // up
+        case 1: y += i; break; // down
+        case 2: x -= i; break; // left
+        case 3: x += i; break; // right
+      }
+      for (let dx = 0; dx < pathWidth; dx++) {
+        for (let dy = 0; dy < pathWidth; dy++) {
+          const px = x + dx, py = y + dy;
+          if (px > 1 && px < size - 2 && py > 1 && py < size - 2) {
+            tiles[py * size + px] = 1;
+          }
         }
       }
     }
   }
 
-  // Diagonal path from top-left toward center
-  const pathStart = 3;
-  const pathEnd = Math.floor(size * 0.6);
-  for (let i = pathStart; i < pathEnd; i++) {
-    const r = i;
-    const c = i;
-    if (c < size - 1 && r < size - 1) {
-      tiles[r * size + c] = 1;
-      tiles[r * size + c + 1] = 1;
+  // ── Rock clusters (6-10 clusters for natural obstacles) ────────────
+  const rockClusterCount = 6 + Math.floor(rng() * 5);
+  for (let c = 0; c < rockClusterCount; c++) {
+    const cx = 3 + Math.floor(rng() * (size - 6));
+    const cy = 3 + Math.floor(rng() * (size - 6));
+    const clusterSize = 2 + Math.floor(rng() * 4);
+    for (let i = 0; i < clusterSize; i++) {
+      const dx = Math.floor((rng() - 0.5) * 5);
+      const dy = Math.floor((rng() - 0.5) * 5);
+      const x = cx + dx;
+      const y = cy + dy;
+      if (x > 1 && x < size - 2 && y > 1 && y < size - 2) {
+        // Don't overwrite paths
+        if (tiles[y * size + x] !== 1) {
+          tiles[y * size + x] = 2;
+        }
+      }
     }
   }
 
-  // Boss arena — clear a circle in the center-bottom and mark with accent tiles
+  // ── Ponds (2-3 water/lava/void features) ───────────────────────────
+  const pondCount = 2 + Math.floor(rng() * 2);
+  for (let p = 0; p < pondCount; p++) {
+    const pondCx = 4 + Math.floor(rng() * (size - 8));
+    const pondCy = 4 + Math.floor(rng() * (size - 8));
+    const pondRadius = 2 + Math.floor(rng() * 3);
+    for (let y = pondCy - pondRadius; y <= pondCy + pondRadius; y++) {
+      for (let x = pondCx - pondRadius; x <= pondCx + pondRadius; x++) {
+        if (x > 1 && x < size - 2 && y > 1 && y < size - 2) {
+          const dx = x - pondCx;
+          const dy = y - pondCy;
+          if (dx * dx + dy * dy <= pondRadius * pondRadius) {
+            // Don't overwrite paths
+            if (tiles[y * size + x] !== 1) {
+              tiles[y * size + x] = 3;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Clearings (open areas for combat — clear obstacles) ────────────
+  const clearingCount = 2 + Math.floor(rng() * 2);
+  for (let c = 0; c < clearingCount; c++) {
+    const cx = 4 + Math.floor(rng() * (size - 8));
+    const cy = 4 + Math.floor(rng() * (size - 8));
+    const radius = 3 + Math.floor(rng() * 2);
+    for (let y = cy - radius; y <= cy + radius; y++) {
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        if (x > 1 && x < size - 2 && y > 1 && y < size - 2) {
+          const dx = x - cx;
+          const dy = y - cy;
+          if (dx * dx + dy * dy <= radius * radius) {
+            // Clear rocks but keep paths and water
+            if (tiles[y * size + x] === 2) {
+              tiles[y * size + x] = 0;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Boss arena (large circular area at bottom-center) ──────────────
   const arenaCx = Math.floor(size / 2);
-  const arenaCy = size - 3;
-  const arenaRadius = 3;
+  const arenaCy = size - 5;
+  const arenaRadius = 4 + Math.floor(size / 20); // scales with realm size
   for (let y = arenaCy - arenaRadius; y <= arenaCy + arenaRadius; y++) {
     for (let x = arenaCx - arenaRadius; x <= arenaCx + arenaRadius; x++) {
       if (x > 0 && x < size - 1 && y > 0 && y < size - 1) {
