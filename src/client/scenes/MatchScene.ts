@@ -94,8 +94,8 @@ export class MatchScene extends GameScene {
     // Setup tilemap
     this.setupTilemap(arena.tiles, arena.width, arena.height, "forest");
 
-    // Camera zoom — zoom in so only ~25 tiles visible
-    this.setupCameraZoom(1.8);
+    // Camera zoom — zoom in slightly so not the whole map is visible
+    this.setupCameraZoom(1.2);
 
     // HUD
     this.hud.setRealmName("Match Arena");
