@@ -1,122 +1,38 @@
 /**
  * GameApp — the PixiJS application and main loop.
  *
- * Phase 4: Roguelite realm generation + death loop.
- *   - Realms are procedurally generated from a seed (composeRealmSeed)
- *   - Biome chosen by depth (forest → cave → void)
- *   - Boss spawned in arena at center-bottom
- *   - On death: depth++, new realm generated, DevourProgress preserved
- *   - R key now triggers "next realm" instead of same-realm respawn
+ * REWRITTEN to use SceneManager for proper game flow:
+ *   LoadingScene → ModeSelectScene → MatchScene / RealmScene
  *
- * Main loop order (each frame):
- *   1. Read input → ECS (movement + skill casts + Devour)
- *   2. Step simulation systems
- *   3. Update camera
- *   4. Sync renderers
- *   5. Update HUD
- *   6. Check for death → trigger realm transition
+ * GameApp now just:
+ *   1. Initializes Pixi
+ *   2. Creates the SceneManager + all scenes
+ *   3. Runs the main loop (delegates to SceneManager.update)
+ *   4. Handles window resize
  */
 
 import { Application, Container } from "pixi.js";
-import { IsoTilemap } from "./render/IsoTilemap";
-import { EntityRenderer } from "./render/EntityRenderer";
-import { CameraController } from "./render/CameraController";
-import { InputManager } from "./input/InputManager";
-import { HUD } from "./ui/HUD";
-import { movementSystem } from "@core/ecs/systems/movementSystem";
-import {
-  cooldownSystem,
-  facingSystem,
-  projectileSystem,
-  collisionSystem,
-  enemyAISystem,
-  damageNumberSystem,
-  lifetimeSystem,
-  cleanupDeadEntities,
-  spawnEnemy,
-  clearAllEntities,
-  lingeringAreaSystem,
-  growModifierSystem,
-  setPlayerDeathCallback,
-} from "@core/ecs/systems/combatSystems";
-import {
-  castSkillSystem,
-  novaSystem,
-  beamSystem,
-  statusEffectSystem,
-  skillCooldownSystem,
-  spawnPlayerWithSkills,
-} from "@core/ecs/systems/skillSystems";
-import {
-  autoDevourSystem,
-  devourSkillSystem,
-  voiceOfTheWorldSystem,
-  addDevourProgressToPlayer,
-  setEnemyType,
-  getDevourProgressSummary,
-  spawnVoiceOfTheWorld,
-} from "@core/ecs/systems/devourSystems";
-import { tileToWorld } from "@core/iso";
-import { getBiomeForDepth } from "@data/biomes";
-import { generateRealm, computeEssenceSalt, type GeneratedRealm } from "@core/realm/generator";
-import {
-  createNewRunState,
-  advanceRunOnDeath,
-  type RunState,
-} from "@core/realm/runState";
-import { defineQuery, hasComponent } from "bitecs";
-import { world, PlayerTag, Health, DevourProgress, EnemyAI, MatchState } from "@core/ecs/world";
-import { SanctumUI } from "./ui/SanctumUI";
+import { SceneManager } from "./scenes/SceneManager";
+import { LoadingScene } from "./scenes/LoadingScene";
+import { ModeSelectScene } from "./scenes/ModeSelectScene";
+import { MatchScene } from "./scenes/MatchScene";
+import { RealmScene } from "./scenes/RealmScene";
 import { PrologueUI } from "./ui/PrologueUI";
-import { ModeSelectUI, type GameMode } from "./ui/ModeSelectUI";
-import { playerSkills, rebuildSkillStatsCache } from "@core/ecs/systems/skillSystems";
-import { REALM_INTROS } from "@data/narrative";
-import {
-  startMatch,
-  endMatch,
-  getMatchArena,
-  matchStateSystem,
-  minionAISystem,
-  structureAISystem,
-  cleanupMatchEntities,
-} from "@core/ecs/systems/matchSystems";
-import { DEFAULT_MATCH_CONFIG } from "@data/matchData";
-void DEFAULT_MATCH_CONFIG;
-
-const playerDeathCheckQuery = defineQuery([PlayerTag, Health]);
-const enemyQuery = defineQuery([EnemyAI, Health]);
-const matchStateQuery = defineQuery([MatchState]);
+import { SanctumUI } from "./ui/SanctumUI";
+import { createNewRunState, type RunState } from "@core/realm/runState";
+import type { GameMode } from "./ui/ModeSelectUI";
 
 export class GameApp {
   private app: Application;
   private worldContainer!: Container;
-  private tilemap!: IsoTilemap;
-  private entityRenderer!: EntityRenderer;
-  private camera!: CameraController;
-  private input!: InputManager;
-  private hud!: HUD;
+  private sceneManager!: SceneManager;
+  private runState: RunState;
+  private prologueUI!: PrologueUI;
+  private sanctumUI!: SanctumUI;
+  private realmScene!: RealmScene;
 
   private lastTime = 0;
   private running = false;
-  private rKeyHeld = false;
-
-  // Phase 4: Roguelite state
-  private runState: RunState;
-  private currentRealm: GeneratedRealm | null = null;
-  private bossEid: number = -1;
-  private realmTransitioning = false;
-  private realmCleared: boolean = false;
-
-  // Phase 5: Sanctum UI
-  private sanctumUI!: SanctumUI;
-
-  // Phase 6: Prologue UI
-  private prologueUI!: PrologueUI;
-
-  // Phase 7: Mode select + match mode
-  private modeSelectUI!: ModeSelectUI;
-  private gameMode: GameMode = "realm";
-  private matchEnding: boolean = false;
 
   constructor() {
     this.app = new Application();
@@ -136,480 +52,85 @@ export class GameApp {
     canvas.id = "soulforge-canvas";
     document.getElementById("app")!.appendChild(canvas);
 
-    // World container holds everything that lives in game space.
+    // World container
     this.worldContainer = new Container();
     this.worldContainer.label = "World";
     this.app.stage.addChild(this.worldContainer);
-
-    // Entity renderer (created before tilemap so entities render on top)
-    this.entityRenderer = new EntityRenderer();
-    this.worldContainer.addChild(this.entityRenderer.container);
-
-    // Phase 5: Sync owned skills to the registry before generating the first realm
-    this.syncOwnedSkillsToRegistry();
-
-    // Generate the first realm
-    this.generateAndLoadRealm();
-
-    // Camera
-    this.camera = new CameraController(
-      this.worldContainer,
-      this.app.screen.width,
-      this.app.screen.height
-    );
-
-    // Input
-    this.input = new InputManager((sx, sy) => this.camera.screenToWorld(sx, sy));
-
-    // Click handling on the canvas — left = move, right = cast slot 0
-    canvas.addEventListener("pointerdown", (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      if (e.button === 2) {
-        this.input.onCanvasRightClick(sx, sy);
-      } else if (e.button === 0) {
-        this.input.onCanvasLeftClick(sx, sy);
-      }
-    });
-
-    // HUD
-    this.hud = new HUD(this.currentRealm?.name ?? "Unknown");
-    this.hud.hideLoading();
-
-    // Phase 5: Initialize Sanctum UI
-    this.sanctumUI = new SanctumUI(this.runState, () => this.descendFromSanctum());
-
-    // Phase 6: Initialize Prologue UI (shown on first load)
-    this.prologueUI = new PrologueUI(() => {
-      // After prologue, show the mode select screen
-      this.modeSelectUI.show();
-    });
-
-    // Phase 7: Initialize Mode Select UI
-    this.modeSelectUI = new ModeSelectUI((mode: GameMode) => this.onModeSelected(mode));
-
-    // Show prologue on first load (before the game loop starts)
-    this.prologueUI.start();
-
-    // Handle window resize
-    window.addEventListener("resize", () => {
-      this.camera.resize(this.app.screen.width, this.app.screen.height);
-    });
-
-    // Enable sortable children for depth ordering
     this.worldContainer.sortableChildren = true;
 
-    // Phase 4: Register the player death callback to save DevourProgress
-    // BEFORE the player entity is removed by cleanupDeadEntities.
-    setPlayerDeathCallback((pid: number) => {
-      if (hasComponent(world, DevourProgress, pid)) {
-        this.runState.devourProgress = {
-          unlockedElements: DevourProgress.unlockedElements[pid],
-          unlockedForms: DevourProgress.unlockedForms[pid],
-          unlockedVectors: DevourProgress.unlockedVectors[pid],
-          unlockedModifiers: DevourProgress.unlockedModifiers[pid],
-          totalDevoured: DevourProgress.totalDevoured[pid],
-        };
-        console.log(
-          `%c[Death] %cDevourProgress saved: ${this.runState.devourProgress.totalDevoured} devoured, elements=0b${this.runState.devourProgress.unlockedElements.toString(2)}`,
-          "color: #ff4040; font-weight: bold;",
-          "color: #e0e0e8;"
-        );
+    // Sanctum UI (shared between RealmScene and mode select)
+    this.sanctumUI = new SanctumUI(this.runState, () => {
+      this.realmScene.onSanctumDescend();
+    });
+
+    // Prologue (shown before mode select on first load)
+    this.prologueUI = new PrologueUI(() => {
+      // After prologue, go to mode select
+      this.sceneManager.switchTo("modeSelect");
+    });
+
+    // Create scene manager
+    this.sceneManager = new SceneManager(this.app, this.worldContainer);
+
+    // Create and register scenes
+    const loadingScene = new LoadingScene(this.app, this.worldContainer, () => {
+      // After loading, show prologue (then prologue → mode select)
+      this.prologueUI.start();
+    });
+
+    const modeSelectScene = new ModeSelectScene(
+      this.app,
+      this.worldContainer,
+      (mode: GameMode) => this.onModeSelected(mode)
+    );
+
+    this.realmScene = new RealmScene(
+      this.app,
+      this.worldContainer,
+      this.runState,
+      this.sanctumUI,
+      () => {
+        // Return to mode select from realm
+        this.sceneManager.switchTo("modeSelect");
       }
+    );
+
+    const matchScene = new MatchScene(
+      this.app,
+      this.worldContainer,
+      this.runState,
+      () => {
+        // Return to mode select from match
+        this.sceneManager.switchTo("modeSelect");
+      }
+    );
+
+    this.sceneManager.register("loading", loadingScene);
+    this.sceneManager.register("modeSelect", modeSelectScene);
+    this.sceneManager.register("realm", this.realmScene);
+    this.sceneManager.register("match", matchScene);
+
+    // Start with loading scene
+    this.sceneManager.switchTo("loading");
+
+    // Window resize
+    window.addEventListener("resize", () => {
+      this.worldContainer.scale.set(this.worldContainer.scale.x); // preserve zoom
     });
 
     console.log(
-      `%c[SoulForge] %cEntered ${this.currentRealm?.name} (Depth ${this.runState.depth})`,
-      "color: #ffb86c; font-weight: bold;",
-      "color: #e0e0e8;"
+      "%cSoulForge %cPhase 7 — MOBA Engine Overhaul\nDev console: window.__soulforge",
+      "color: #ffb86c; font-weight: bold; font-size: 14px;",
+      "color: #8888a0;"
     );
   }
 
-  /**
-   * Generate a new realm from the run state and load it.
-   * Called on init and on death.
-   */
-  private generateAndLoadRealm() {
-    // Clear any existing entities
-    clearAllEntities();
-
-    // Reset realm cleared flag for the new realm
-    this.realmCleared = false;
-
-    // Compute essence salt from the player's persistent devour progress
-    const dp = this.runState.devourProgress;
-    const essenceSalt = computeEssenceSalt(
-      dp.totalDevoured,
-      dp.unlockedElements,
-      dp.unlockedForms,
-      dp.unlockedVectors,
-      dp.unlockedModifiers
-    );
-
-    // Generate the realm
-    this.currentRealm = generateRealm(
-      this.runState.baseSeed,
-      essenceSalt,
-      this.runState.runNumber,
-      this.runState.depth
-    );
-
-    // Recreate the tilemap if it exists, otherwise create it
-    if (this.tilemap) {
-      this.worldContainer.removeChild(this.tilemap.container);
-      this.tilemap.container.destroy();
-    }
-    this.tilemap = new IsoTilemap(this.currentRealm);
-    // Insert tilemap BEFORE the entity renderer so entities render on top
-    this.worldContainer.addChildAt(this.tilemap.container, 0);
-
-    // Spawn entities
-    this.spawnRealmEntities();
-
-    // Spawn the "enter realm" notification
-    const biome = getBiomeForDepth(this.runState.depth);
-    spawnVoiceOfTheWorld(7, 2); // "Entering {biome}..."
-    console.log(`%c${biome.enterFlavor}`, "color: #8888a0; font-style: italic;");
-  }
-
-  /**
-   * Spawn the player at the realm start + all enemies + boss.
-   */
-  private spawnRealmEntities() {
-    if (!this.currentRealm) return;
-    const realm = this.currentRealm;
-    const biome = getBiomeForDepth(this.runState.depth);
-
-    const start = realm.playerStart;
-    const startWorld = tileToWorld(start.col, start.row);
-    const pid = spawnPlayerWithSkills(
-      startWorld.x,
-      startWorld.y,
-      this.runState.equippedSkillIndices
-    );
-
-    // Restore DevourProgress from run state (persists across deaths)
-    addDevourProgressToPlayer(pid);
-    if (hasComponent(world, DevourProgress, pid)) {
-      DevourProgress.unlockedElements[pid] = this.runState.devourProgress.unlockedElements;
-      DevourProgress.unlockedForms[pid] = this.runState.devourProgress.unlockedForms;
-      DevourProgress.unlockedVectors[pid] = this.runState.devourProgress.unlockedVectors;
-      DevourProgress.unlockedModifiers[pid] = this.runState.devourProgress.unlockedModifiers;
-      DevourProgress.totalDevoured[pid] = this.runState.devourProgress.totalDevoured;
-    }
-
-    // Spawn enemies with biome-appropriate types
-    const enemyTypeIds = biome.enemyTypeIds;
-    const statMult = biome.enemyStatMultiplier;
-    for (let i = 0; i < realm.enemySpawns.length; i++) {
-      const spawn = realm.enemySpawns[i];
-      const w = tileToWorld(spawn.col, spawn.row);
-      const eid = spawnEnemy(w.x, w.y);
-      // Assign enemy type from biome's pool (cycled)
-      const typeId = enemyTypeIds[i % enemyTypeIds.length];
-      setEnemyType(eid, typeId);
-
-      // Apply biome stat multiplier
-      if (hasComponent(world, Health, eid)) {
-        Health.max[eid] *= statMult;
-        Health.current[eid] = Health.max[eid];
-      }
-    }
-
-    // Spawn the boss in the arena
-    const bossWorld = tileToWorld(realm.bossSpawn.col, realm.bossSpawn.row);
-    this.bossEid = spawnEnemy(bossWorld.x, bossWorld.y);
-    setEnemyType(this.bossEid, realm.bossTypeId);
-    // Boss gets extra stat multiplier
-    if (hasComponent(world, Health, this.bossEid)) {
-      Health.max[this.bossEid] *= statMult * 1.5;
-      Health.current[this.bossEid] = Health.max[this.bossEid];
-    }
-    // Make boss bigger (radius)
-    if (hasComponent(world, EnemyAI, this.bossEid)) {
-      // Boss is tagged via the enemy type — the renderer will color it
-    }
-
-    console.log(
-      `%c[Realm] %c${realm.name} — Depth ${realm.depth} — ${realm.enemySpawns.length} enemies + 1 boss`,
-      "color: #ffb86c; font-weight: bold;",
-      "color: #e0e0e8;"
-    );
-  }
-
-  /**
-   * Phase 4: Roguelite death loop.
-   * Called when the player dies.
-   * Saves DevourProgress, advances run state, generates new realm.
-   */
-  private onPlayerDeath() {
-    // DevourProgress is already saved by the death callback registered in init().
-
-    // Advance the run state (depth++, runNumber++, mode → sanctum)
-    const oldDepth = this.runState.depth;
-    this.runState = advanceRunOnDeath(this.runState);
-
-    console.log(
-      `%c[Death] %cYou died on depth ${oldDepth}. Entering Sanctum...`,
-      "color: #ff4040; font-weight: bold;",
-      "color: #e0e0e8;"
-    );
-
-    // Phase 5: Show the Sanctum instead of immediately generating a new realm.
-    // The player crafts/synthesizes/equips skills, then clicks "Descend".
-    this.sanctumUI.updateRunState(this.runState);
-    this.sanctumUI.show();
-  }
-
-  /**
-   * Phase 5: Called when the player clicks "Descend" in the Sanctum.
-   * Generates a new realm and restores the player's equipped skills.
-   */
-  private descendFromSanctum() {
-    // Check if this is a voluntary return (player alive) or a death/clear descent
-    const players = playerDeathCheckQuery(world);
-    const isVoluntary = players.length > 0;
-
-    if (isVoluntary && !this.realmCleared) {
-      // Voluntary return to same realm (player opened Sanctum without dying)
-      // Don't increment depth — just regenerate the same realm
-      console.log(
-        `%c[Sanctum] %cReturning to depth ${this.runState.depth}...`,
-        "color: #ffb86c; font-weight: bold;",
-        "color: #e0e0e8;"
-      );
-    } else if (this.realmCleared) {
-      // Realm was cleared — advance to next depth (no death penalty)
-      console.log(
-        `%c[Realm Cleared] %cDescending to depth ${this.runState.depth + 1}...`,
-        "color: #40ff40; font-weight: bold;",
-        "color: #e0e0e8;"
-      );
-      this.runState = {
-        ...this.runState,
-        depth: this.runState.depth + 1,
-        runNumber: this.runState.runNumber + 1,
-      };
-    } else {
-      // Death descent — depth was already incremented by onPlayerDeath/advanceRunOnDeath
-      console.log(
-        `%c[Sanctum] %cDescending to depth ${this.runState.depth}...`,
-        "color: #ffb86c; font-weight: bold;",
-        "color: #e0e0e8;"
-      );
-    }
-
-    // Sync the player's owned skills to the skillSystems registry
-    this.syncOwnedSkillsToRegistry();
-
-    // Generate and load the new realm
-    this.generateAndLoadRealm();
-
-    // Phase 6: Show realm intro narrative
-    if (this.currentRealm) {
-      const intro = REALM_INTROS[this.currentRealm.biome];
-      if (intro) {
-        spawnVoiceOfTheWorld(7, 2);
-        console.log(`%c${intro.intro}`, "color: #8888a0; font-style: italic;");
-        console.log(`%c${intro.sageComment}`, "color: #d0a0ff; font-style: italic;");
-      }
-    }
-
-    // Update HUD with new realm name
-    if (this.hud && this.currentRealm) {
-      this.hud.setRealmName(this.currentRealm.name);
-    }
-  }
-
-  /**
-   * Phase 5: Sync the RunState's ownedSkills to the skillSystems playerSkills array.
-   * Also updates the stats cache. Called before spawning the player so that
-   * spawnPlayerWithSkills can read the correct skill indices.
-   */
-  private syncOwnedSkillsToRegistry() {
-    // Replace the playerSkills array contents with the run state's owned skills
-    playerSkills.length = 0; // clear
-    for (const skill of this.runState.ownedSkills) {
-      playerSkills.push(skill);
-    }
-    // Rebuild the stats cache
-    // (getSkillStats reads from playerSkillStatsCache which is built at module load)
-    // We need to rebuild it — but it's a const array. Let me use a different approach:
-    // spawnPlayerWithSkills reads from playerSkillStatsCache, which was built from STARTER_SKILLS.
-    // For Phase 5, we need to make the stats cache dynamic.
-    // For now, let's rebuild it by re-importing computeSkillStats for each skill.
-    // The skillSystems module exports getSkillStats which reads the cache.
-    // We'll update the cache directly.
-    this.rebuildSkillStatsCache();
-  }
-
-  /**
-   * Rebuild the skill stats cache from the current playerSkills array.
-   */
-  private rebuildSkillStatsCache() {
-    rebuildSkillStatsCache();
-  }
-
-  /**
-   * Phase 7: Called when the player selects a game mode.
-   */
   private onModeSelected(mode: GameMode) {
-    this.gameMode = mode;
     console.log(`%c[Mode] %cSelected: ${mode}`, "color: #ffb86c; font-weight: bold;", "color: #e0e0e8;");
-
     if (mode === "realm") {
-      // Enter realm mode — show realm intro
-      if (this.currentRealm) {
-        const intro = REALM_INTROS[this.currentRealm.biome];
-        if (intro) {
-          spawnVoiceOfTheWorld(7, 2);
-          console.log(`%c${intro.intro}`, "color: #8888a0; font-style: italic;");
-          console.log(`%c${intro.sageComment}`, "color: #d0a0ff; font-style: italic;");
-        }
-      }
+      this.sceneManager.switchTo("realm");
     } else if (mode === "match") {
-      // Enter match mode — start the match
-      this.startMatchMode();
-    }
-  }
-
-  /**
-   * Phase 7: Start a match — build arena, spawn player + structures.
-   */
-  private startMatchMode() {
-    // Clear any existing realm entities
-    clearAllEntities();
-
-    // Start the match (builds arena, spawns structures, inits match state)
-    startMatch();
-
-    // Spawn the player at the match arena's player start
-    const arena = getMatchArena();
-    if (!arena) return;
-
-    const startWorld = tileToWorld(arena.playerStart.col, arena.playerStart.row);
-    const pid = spawnPlayerWithSkills(
-      startWorld.x,
-      startWorld.y,
-      this.runState.equippedSkillIndices
-    );
-
-    // Restore DevourProgress
-    addDevourProgressToPlayer(pid);
-    if (hasComponent(world, DevourProgress, pid)) {
-      DevourProgress.unlockedElements[pid] = this.runState.devourProgress.unlockedElements;
-      DevourProgress.unlockedForms[pid] = this.runState.devourProgress.unlockedForms;
-      DevourProgress.unlockedVectors[pid] = this.runState.devourProgress.unlockedVectors;
-      DevourProgress.unlockedModifiers[pid] = this.runState.devourProgress.unlockedModifiers;
-      DevourProgress.totalDevoured[pid] = this.runState.devourProgress.totalDevoured;
-    }
-
-    // Rebuild the tilemap with the match arena
-    if (this.tilemap) {
-      this.worldContainer.removeChild(this.tilemap.container);
-      this.tilemap.container.destroy();
-    }
-
-    // Create a RealmData-compatible object from the match arena
-    const matchRealmData = {
-      name: "Match Arena",
-      biome: "forest",
-      width: arena.width,
-      height: arena.height,
-      tiles: arena.tiles,
-      playerStart: arena.playerStart,
-      enemySpawns: [],
-    };
-    this.tilemap = new IsoTilemap(matchRealmData);
-    this.worldContainer.addChildAt(this.tilemap.container, 0);
-
-    // Update HUD
-    this.hud.setRealmName("Match Arena");
-
-    // Sync skills
-    this.syncOwnedSkillsToRegistry();
-
-    console.log(
-      `%c[Match] %cPlayer spawned at match arena. Destroy the enemy core!`,
-      "color: #ffb86c; font-weight: bold;",
-      "color: #e0e0e8;"
-    );
-  }
-
-  /**
-   * Phase 7: End the match and return to mode select.
-   */
-  private endMatchMode() {
-    endMatch();
-    clearAllEntities();
-    this.gameMode = "realm";
-
-    // Regenerate the realm
-    this.generateAndLoadRealm();
-
-    // Show mode select again
-    this.modeSelectUI.show();
-  }
-
-  /**
-   * R key opens the Sanctum at any time (alive or dead).
-   * If the player is dead, it triggers the death flow (Sanctum + depth++).
-   * If the player is alive, it opens the Sanctum voluntarily (no depth increment,
-   *   no death penalty — the player keeps their current realm progress).
-   * This lets players craft skills mid-run without dying.
-   */
-  private handleRKey() {
-    if (!this.input.isRPressed() || this.rKeyHeld) return;
-    this.rKeyHeld = true;
-
-    const players = playerDeathCheckQuery(world);
-    if (players.length === 0) {
-      // Player is dead — trigger death loop (depth++, Sanctum)
-      this.onPlayerDeath();
-    } else {
-      // Player is alive — open Sanctum voluntarily (no depth increment)
-      const pid = players[0];
-      if (hasComponent(world, DevourProgress, pid)) {
-        this.runState.devourProgress = {
-          unlockedElements: DevourProgress.unlockedElements[pid],
-          unlockedForms: DevourProgress.unlockedForms[pid],
-          unlockedVectors: DevourProgress.unlockedVectors[pid],
-          unlockedModifiers: DevourProgress.unlockedModifiers[pid],
-          totalDevoured: DevourProgress.totalDevoured[pid],
-        };
-      }
-      console.log(
-        `%c[Sanctum] %cOpening Sanctum (voluntary). Press Descend to return.`,
-        "color: #ffb86c; font-weight: bold;",
-        "color: #e0e0e8;"
-      );
-      this.sanctumUI.updateRunState(this.runState);
-      this.sanctumUI.show();
-    }
-  }
-
-  /**
-   * Check if the realm is cleared (all enemies + boss dead).
-   * If so, show a "Realm Cleared" notification and prompt descent.
-   */
-  private checkRealmClear() {
-    if (!this.currentRealm || this.realmCleared) return;
-
-    const enemies = enemyQuery(world);
-    let aliveCount = 0;
-    for (let i = 0; i < enemies.length; i++) {
-      if (Health.current[enemies[i]] > 0) aliveCount++;
-    }
-
-    if (aliveCount === 0) {
-      this.realmCleared = true;
-      console.log(
-        `%c[Realm Cleared] %cAll enemies defeated! Press R to descend.`,
-        "color: #40ff40; font-weight: bold;",
-        "color: #e0e0e8;"
-      );
-      spawnVoiceOfTheWorld(9, 2);
+      this.sceneManager.switchTo("match");
     }
   }
 
@@ -622,19 +143,13 @@ export class GameApp {
   private tick = () => {
     if (!this.running) return;
 
-    // Phase 6: Pause simulation while the Prologue is playing
+    // Pause during prologue
     if (this.prologueUI && this.prologueUI.isPlaying()) {
       this.lastTime = performance.now();
       return;
     }
 
-    // Phase 7: Pause simulation while the Mode Select is visible
-    if (this.modeSelectUI && this.modeSelectUI.isVisible()) {
-      this.lastTime = performance.now();
-      return;
-    }
-
-    // Phase 5: Pause simulation while the Sanctum is open
+    // Pause during Sanctum
     if (this.sanctumUI && this.sanctumUI.isVisible()) {
       this.lastTime = performance.now();
       return;
@@ -645,112 +160,13 @@ export class GameApp {
     this.lastTime = now;
     if (dt > 0.1) dt = 0.1;
 
-    // ── Step 1: input → ECS ────────────────────────────────────────────
-    this.input.update();
-
-    // R key — triggers death loop if player is dead
-    this.handleRKey();
-    if (!this.input.isRPressed()) {
-      this.rKeyHeld = false;
-    }
-
-    // Read & process all pending skill cast requests (slots 0..3)
-    const casts = this.input.consumeCastRequests();
-    for (let i = 0; i < casts.length; i++) {
-      const c = casts[i];
-      if (c.active) {
-        castSkillSystem(dt, { slot: c.slot, targetX: c.targetX, targetY: c.targetY, active: true });
-      }
-    }
-    this.input.clearCastRequests();
-
-    // Phase 3: Devour skill (E key)
-    const devourRequested = this.input.consumeDevourRequest();
-    if (devourRequested) {
-      devourSkillSystem(dt, { active: true });
-    }
-
-    // ── Step 2: simulation systems in dependency order ────────────────
-    skillCooldownSystem(dt);
-    cooldownSystem(dt);
-    facingSystem(dt);
-    projectileSystem(dt);
-    novaSystem(dt);
-    beamSystem(dt);
-    collisionSystem();
-    enemyAISystem(dt);
-    movementSystem(dt);
-    damageNumberSystem(dt);
-    statusEffectSystem(dt);
-    lingeringAreaSystem(dt);
-    growModifierSystem(dt);
-    autoDevourSystem();
-    voiceOfTheWorldSystem(dt);
-    cleanupDeadEntities();
-    lifetimeSystem(dt);
-
-    // Phase 7: Match mode systems
-    if (this.gameMode === "match") {
-      matchStateSystem(dt);
-      minionAISystem(dt);
-      structureAISystem(dt);
-      cleanupMatchEntities();
-
-      // Check for match end (only once — use matchEnding flag)
-      if (!this.matchEnding) {
-        const matchStates = matchStateQuery(world);
-        if (matchStates.length > 0) {
-          const result = MatchState.result[matchStates[0]];
-          if (result !== 0) {
-            this.matchEnding = true;
-            const resultText = result === 1 ? "VICTORY" : "DEFEAT";
-            console.log(
-              `%c[Match] %c${resultText}! Returning to mode select...`,
-              "color: #ffb86c; font-weight: bold;",
-              result === 1 ? "color: #40ff40;" : "color: #ff4040;"
-            );
-            // Show result notification
-            spawnVoiceOfTheWorld(result === 1 ? 10 : 11, 2);
-            setTimeout(() => {
-              this.endMatchMode();
-              this.matchEnding = false;
-            }, 3000);
-          }
-        }
-      }
-    } else {
-      // Phase 6.5: Check if realm is cleared (all enemies dead)
-      this.checkRealmClear();
-    }
-
-    // ── Step 3: Check for player death ─────────────────────────────────
-    if (!this.realmTransitioning) {
-      const players = playerDeathCheckQuery(world);
-      if (players.length === 0) {
-        // Player is dead — show death message, wait for R key
-        // (handled in handleRKey)
-      }
-    }
-
-    // ── Step 4: camera → world container ───────────────────────────────
-    this.camera.update(dt);
-
-    // ── Step 5: sync renderers ─────────────────────────────────────────
-    this.entityRenderer.sync();
-
-    // ── Step 6: HUD ────────────────────────────────────────────────────
-    this.hud.update(dt);
-    // Update HUD with run state info
-    this.hud.updateRunState(this.runState.depth, this.runState.devourProgress.totalDevoured);
+    // Delegate to scene manager
+    this.sceneManager.update(dt);
   };
 
   destroy() {
     this.running = false;
     this.app.ticker.remove(this.tick);
-    this.input.dispose();
     this.app.destroy(true);
   }
 }
-
-// Suppress unused import warnings — these are used in type annotations only
-void getDevourProgressSummary;

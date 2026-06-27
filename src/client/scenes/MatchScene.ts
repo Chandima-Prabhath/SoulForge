@@ -30,7 +30,7 @@ import {
   structureAISystem,
   cleanupMatchEntities,
 } from "@core/ecs/systems/matchSystems";
-import { spawnPlayerWithSkills } from "@core/ecs/systems/skillSystems";
+import { spawnPlayerWithSkills, playerSkills, rebuildSkillStatsCache } from "@core/ecs/systems/skillSystems";
 import { addDevourProgressToPlayer } from "@core/ecs/systems/devourSystems";
 import { tileToWorld } from "@core/iso";
 import { clearAllEntities } from "@core/ecs/systems/combatSystems";
@@ -66,10 +66,9 @@ export class MatchScene extends GameScene {
     startMatch();
 
     // Sync skills
-    const { playerSkills, rebuildSkillStatsCache: rebuild } = require("@core/ecs/systems/skillSystems");
     playerSkills.length = 0;
     for (const skill of this.runState.ownedSkills) playerSkills.push(skill);
-    rebuild();
+    rebuildSkillStatsCache();
 
     // Spawn player
     const arena = getMatchArena();
