@@ -233,6 +233,7 @@ export class HUD {
       case 6: return "[Devour] activated.";
       case 7: return "Entering a new realm...";
       case 8: return "You died. Press R to descend.";
+      case 9: return "✦ Realm Cleared! Press R to descend. ✦";
       default: return "";
     }
   }

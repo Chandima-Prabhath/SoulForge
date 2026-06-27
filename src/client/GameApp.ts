@@ -72,6 +72,7 @@ import { playerSkills, rebuildSkillStatsCache } from "@core/ecs/systems/skillSys
 import { REALM_INTROS } from "@data/narrative";
 
 const playerDeathCheckQuery = defineQuery([PlayerTag, Health]);
+const enemyQuery = defineQuery([EnemyAI, Health]);
 
 export class GameApp {
   private app: Application;
@@ -91,6 +92,7 @@ export class GameApp {
   private currentRealm: GeneratedRealm | null = null;
   private bossEid: number = -1;
   private realmTransitioning = false;
+  private realmCleared: boolean = false;
 
   // Phase 5: Sanctum UI
   private sanctumUI!: SanctumUI;
@@ -217,6 +219,9 @@ export class GameApp {
   private generateAndLoadRealm() {
     // Clear any existing entities
     clearAllEntities();
+
+    // Reset realm cleared flag for the new realm
+    this.realmCleared = false;
 
     // Compute essence salt from the player's persistent devour progress
     const dp = this.runState.devourProgress;
@@ -348,11 +353,38 @@ export class GameApp {
    * Generates a new realm and restores the player's equipped skills.
    */
   private descendFromSanctum() {
-    console.log(
-      `%c[Sanctum] %cDescending to depth ${this.runState.depth}...`,
-      "color: #ffb86c; font-weight: bold;",
-      "color: #e0e0e8;"
-    );
+    // Check if this is a voluntary return (player alive) or a death/clear descent
+    const players = playerDeathCheckQuery(world);
+    const isVoluntary = players.length > 0;
+
+    if (isVoluntary && !this.realmCleared) {
+      // Voluntary return to same realm (player opened Sanctum without dying)
+      // Don't increment depth — just regenerate the same realm
+      console.log(
+        `%c[Sanctum] %cReturning to depth ${this.runState.depth}...`,
+        "color: #ffb86c; font-weight: bold;",
+        "color: #e0e0e8;"
+      );
+    } else if (this.realmCleared) {
+      // Realm was cleared — advance to next depth (no death penalty)
+      console.log(
+        `%c[Realm Cleared] %cDescending to depth ${this.runState.depth + 1}...`,
+        "color: #40ff40; font-weight: bold;",
+        "color: #e0e0e8;"
+      );
+      this.runState = {
+        ...this.runState,
+        depth: this.runState.depth + 1,
+        runNumber: this.runState.runNumber + 1,
+      };
+    } else {
+      // Death descent — depth was already incremented by onPlayerDeath/advanceRunOnDeath
+      console.log(
+        `%c[Sanctum] %cDescending to depth ${this.runState.depth}...`,
+        "color: #ffb86c; font-weight: bold;",
+        "color: #e0e0e8;"
+      );
+    }
 
     // Sync the player's owned skills to the skillSystems registry
     this.syncOwnedSkillsToRegistry();
@@ -406,21 +438,64 @@ export class GameApp {
   }
 
   /**
-   * R key now triggers realm transition (death or next realm).
-   * If player is alive, R does nothing (prevents accidental skips).
-   * If player is dead, R descends to the next realm.
+   * R key opens the Sanctum at any time (alive or dead).
+   * If the player is dead, it triggers the death flow (Sanctum + depth++).
+   * If the player is alive, it opens the Sanctum voluntarily (no depth increment,
+   *   no death penalty — the player keeps their current realm progress).
+   * This lets players craft skills mid-run without dying.
    */
   private handleRKey() {
     if (!this.input.isRPressed() || this.rKeyHeld) return;
     this.rKeyHeld = true;
 
-    // Check if player is dead
     const players = playerDeathCheckQuery(world);
     if (players.length === 0) {
-      // Player is dead — trigger death loop (shows Sanctum)
+      // Player is dead — trigger death loop (depth++, Sanctum)
       this.onPlayerDeath();
+    } else {
+      // Player is alive — open Sanctum voluntarily (no depth increment)
+      const pid = players[0];
+      if (hasComponent(world, DevourProgress, pid)) {
+        this.runState.devourProgress = {
+          unlockedElements: DevourProgress.unlockedElements[pid],
+          unlockedForms: DevourProgress.unlockedForms[pid],
+          unlockedVectors: DevourProgress.unlockedVectors[pid],
+          unlockedModifiers: DevourProgress.unlockedModifiers[pid],
+          totalDevoured: DevourProgress.totalDevoured[pid],
+        };
+      }
+      console.log(
+        `%c[Sanctum] %cOpening Sanctum (voluntary). Press Descend to return.`,
+        "color: #ffb86c; font-weight: bold;",
+        "color: #e0e0e8;"
+      );
+      this.sanctumUI.updateRunState(this.runState);
+      this.sanctumUI.show();
     }
-    // If player is alive, R does nothing (prevents accidental realm skips)
+  }
+
+  /**
+   * Check if the realm is cleared (all enemies + boss dead).
+   * If so, show a "Realm Cleared" notification and prompt descent.
+   */
+  private checkRealmClear() {
+    if (!this.currentRealm || this.realmCleared) return;
+
+    const enemies = enemyQuery(world);
+    let aliveCount = 0;
+    for (let i = 0; i < enemies.length; i++) {
+      if (Health.current[enemies[i]] > 0) aliveCount++;
+    }
+
+    if (aliveCount === 0) {
+      this.realmCleared = true;
+      console.log(
+        `%c[Realm Cleared] %cAll enemies defeated! Press R to descend.`,
+        "color: #40ff40; font-weight: bold;",
+        "color: #e0e0e8;"
+      );
+      spawnVoiceOfTheWorld(9, 2);
+    }
   }
 
   start() {
@@ -492,6 +567,9 @@ export class GameApp {
     voiceOfTheWorldSystem(dt);
     cleanupDeadEntities();
     lifetimeSystem(dt);
+
+    // Phase 6.5: Check if realm is cleared (all enemies dead)
+    this.checkRealmClear();
 
     // ── Step 3: Check for player death ─────────────────────────────────
     if (!this.realmTransitioning) {
