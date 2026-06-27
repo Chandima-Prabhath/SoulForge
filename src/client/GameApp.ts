@@ -38,6 +38,8 @@ import {
   cleanupDeadEntities,
   spawnEnemy,
   clearAllEntities,
+  lingeringAreaSystem,
+  growModifierSystem,
 } from "@core/ecs/systems/combatSystems";
 import {
   castSkillSystem,
@@ -200,6 +202,8 @@ export class GameApp {
     movementSystem(dt);
     damageNumberSystem(dt);
     statusEffectSystem(dt);
+    lingeringAreaSystem(dt);
+    growModifierSystem(dt);
     cleanupDeadEntities();
     lifetimeSystem(dt);
 

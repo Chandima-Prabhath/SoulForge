@@ -204,6 +204,15 @@ function spawnProjectileCast(
     Projectile.statusDuration[eid] = 0;
     Projectile.statusMagnitude[eid] = 0;
   }
+  // Phase 3: modifier fields
+  Projectile.splitOnKill[eid] = stats.splitOnKill ? 1 : 0;
+  Projectile.lingerDuration[eid] = stats.lingerDuration;
+  Projectile.chainCount[eid] = stats.chainCount;
+  Projectile.growWithDistance[eid] = stats.growWithDistance ? 1 : 0;
+  Projectile.distanceTraveled[eid] = 0;
+  Projectile.baseDamage[eid] = stats.damage;
+  Projectile.baseRadius[eid] = stats.radius;
+
   Lifetime.remaining[eid] = stats.lifetime;
   Hitbox.radius[eid] = stats.radius;
   Team.id[eid] = 0;
@@ -595,11 +604,12 @@ export function spawnPlayerWithSkills(x: number, y: number): number {
   Cooldown.current[eid] = 0;
   Cooldown.max[eid] = 0;
 
-  // Equip starter skills: slots 0, 1, 2 (slot 3 reserved for Devour in Phase 3)
+  // Equip starter skills: slots 0-2 = base skills, slot 3 = Chain Lightning (modifier test)
+  // (Slot 3 will be replaced by [Devour] in Phase 3 proper)
   SkillSlot.skillIndex0[eid] = 0; // Mana Bolt
   SkillSlot.skillIndex1[eid] = 1; // Frost Nova
   SkillSlot.skillIndex2[eid] = 2; // Lightning Beam
-  SkillSlot.skillIndex3[eid] = -1; // empty (Devour comes in Phase 3)
+  SkillSlot.skillIndex3[eid] = 6; // Chain Lightning (modifier test, index 6 in STARTER_SKILLS)
   SkillSlot.cd0[eid] = 0;
   SkillSlot.cd1[eid] = 0;
   SkillSlot.cd2[eid] = 0;
@@ -607,7 +617,7 @@ export function spawnPlayerWithSkills(x: number, y: number): number {
   SkillSlot.cdMax0[eid] = playerSkillStatsCache[0].cooldown;
   SkillSlot.cdMax1[eid] = playerSkillStatsCache[1].cooldown;
   SkillSlot.cdMax2[eid] = playerSkillStatsCache[2].cooldown;
-  SkillSlot.cdMax3[eid] = 0;
+  SkillSlot.cdMax3[eid] = playerSkillStatsCache[6].cooldown;
 
   return eid;
 }

@@ -252,4 +252,50 @@ export const STARTER_SKILLS: SkillDefinition[] = [
     modifiers: [null, null, null],
     description: "An instantaneous bolt of lightning. Higher damage, longer cooldown.",
   },
+  // Phase 3: Modifier test skills — demonstrate each modifier
+  {
+    id: "test-piercing-bolt",
+    name: "Piercing Bolt",
+    element: 0, // Force
+    form: 0,    // Projectile
+    vector: 0,  // Ranged
+    modifiers: [0, null, null], // Pierce
+    description: "A Mana Bolt that pierces through 2 extra enemies.",
+  },
+  {
+    id: "test-split-fireball",
+    name: "Split Fireball",
+    element: 1, // Fire
+    form: 0,    // Projectile
+    vector: 0,  // Ranged
+    modifiers: [1, null, null], // Split
+    description: "A fireball that splits into 2 children when it kills an enemy.",
+  },
+  {
+    id: "test-lingering-frost",
+    name: "Lingering Frost",
+    element: 2, // Frost
+    form: 0,    // Projectile
+    vector: 0,  // Ranged
+    modifiers: [2, null, null], // Linger
+    description: "A frost bolt that leaves a damaging slow area on impact.",
+  },
+  {
+    id: "test-chain-lightning",
+    name: "Chain Lightning",
+    element: 3, // Lightning
+    form: 0,    // Projectile
+    vector: 0,  // Ranged
+    modifiers: [3, null, null], // Chain
+    description: "A lightning bolt that bounces to 3 nearby enemies.",
+  },
+  {
+    id: "test-growing-void",
+    name: "Growing Void",
+    element: 4, // Void
+    form: 0,    // Projectile
+    vector: 0,  // Ranged
+    modifiers: [4, null, null], // Grow
+    description: "A void bolt that grows in damage and size as it travels.",
+  },
 ];

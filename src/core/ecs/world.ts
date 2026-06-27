@@ -117,6 +117,14 @@ export const Projectile = defineComponent({
   statusDuration: Types.f32,
   statusMagnitude: Types.f32,
   elementId: Types.ui8,
+  // Phase 3 fields — modifier execution:
+  splitOnKill: Types.ui8,        // 1 = spawn 2 children on enemy kill
+  lingerDuration: Types.f32,     // >0 = leave a damaging area on impact
+  chainCount: Types.ui8,         // remaining chain bounces
+  growWithDistance: Types.ui8,   // 1 = scale damage/size with travel distance
+  distanceTraveled: Types.f32,   // accumulated travel distance (for Grow)
+  baseDamage: Types.f32,         // original damage (for Grow scaling reference)
+  baseRadius: Types.f32,         // original radius (for Grow scaling reference)
 });
 
 /**
@@ -256,6 +264,22 @@ export const NovaRing = defineComponent({
   damage: Types.f32,
   /** Enemies already hit by this nova — prevents multi-hit on same frame. */
   hitCount: Types.ui8,
+});
+
+/**
+ * LingeringArea — a damaging zone left at a point by the Linger modifier.
+ * Damages enemies that enter it on a per-frame basis (with small per-frame
+ * damage to avoid huge ticks).
+ */
+export const LingeringArea = defineComponent({
+  damagePerSec: Types.f32,
+  radius: Types.f32,
+  teamId: Types.ui8,
+  color: Types.ui32,
+  statusType: Types.ui8,
+  statusDuration: Types.f32,
+  statusMagnitude: Types.f32,
+  tickAccumulator: Types.f32, // accumulates dt for per-second damage application
 });
 
 export type World = IWorld;

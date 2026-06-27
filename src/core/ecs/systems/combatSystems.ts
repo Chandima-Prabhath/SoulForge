@@ -23,6 +23,7 @@ import {
   hasComponent,
   removeEntity,
   removeComponent,
+  entityExists,
 } from "bitecs";
 import {
   world,
@@ -43,6 +44,7 @@ import {
   DamageNumber,
   EssenceShard,
   StatusEffect,
+  LingeringArea,
 } from "../world";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,7 +186,9 @@ export function projectileSystem(dt: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Collision System — projectiles hit damageable entities on opposite team
 //
-// On hit: apply damage, spawn damage number, decrement pierce or despawn projectile.
+// On hit: apply damage, spawn damage number, apply status effect, handle
+// modifiers (Split on kill, Linger on impact, Chain bounce), decrement
+// pierce or despawn projectile.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function collisionSystem() {
@@ -193,6 +197,7 @@ export function collisionSystem() {
 
   for (let i = 0; i < projectiles.length; i++) {
     const pid = projectiles[i];
+    if (!entityExists(world, pid)) continue;
     const pTeam = Projectile.teamId[pid];
     const px = Position.x[pid];
     const py = Position.y[pid];
@@ -200,10 +205,10 @@ export function collisionSystem() {
 
     for (let j = 0; j < targets.length; j++) {
       const tid = targets[j];
-      // Skip same-team
       if (Team.id[tid] === pTeam) continue;
-      // Skip dead targets
       if (Health.current[tid] <= 0) continue;
+      // Skip enemies already hit by this projectile (Chain dedup)
+      if (projectileHitSets.has(pid) && projectileHitSets.get(pid)!.has(tid)) continue;
 
       const dx = Position.x[tid] - px;
       const dy = Position.y[tid] - py;
@@ -211,27 +216,264 @@ export function collisionSystem() {
       const combinedR = pr + Hitbox.radius[tid];
 
       if (dist < combinedR) {
-        // HIT — apply damage
         const dmg = Projectile.damage[pid];
         Health.current[tid] = Math.max(0, Health.current[tid] - dmg);
+        spawnDamageNumber(px, py - 10, dmg, false);
 
-        // Spawn damage number at the hit location
-        spawnDamageNumber(px, py - 10, dmg, /*crit*/ false);
+        // Apply status effect from the projectile
+        if (Projectile.statusType[pid] !== 0) {
+          applyProjectileStatus(pid, tid);
+        }
 
-        // If target died, mark for cleanup
+        // Mark this enemy as hit by this projectile (for Chain dedup)
+        if (!projectileHitSets.has(pid)) projectileHitSets.set(pid, new Set());
+        projectileHitSets.get(pid)!.add(tid);
+
+        // Linger modifier: leave a damaging area at the impact point
+        if (Projectile.lingerDuration[pid] > 0) {
+          spawnLingeringArea(px, py, pid);
+        }
+
+        // If target died, handle Split before cleanup
         if (Health.current[tid] <= 0) {
+          if (Projectile.splitOnKill[pid] === 1) {
+            spawnSplitChildren(pid, tid);
+          }
           handleDeath(tid);
+        }
+
+        // Chain modifier: bounce to nearest unhit enemy
+        if (Projectile.chainCount[pid] > 0) {
+          const bounced = bounceChain(pid, tid);
+          if (bounced) {
+            Projectile.chainCount[pid] -= 1;
+            continue; // projectile still alive, skip despawn
+          }
         }
 
         // Decrement pierce or despawn projectile
         if (Projectile.pierceCount[pid] > 0) {
           Projectile.pierceCount[pid] -= 1;
         } else {
+          projectileHitSets.delete(pid);
           removeEntity(world, pid);
-          break; // projectile gone, move to next
+          break;
         }
       }
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Modifier helpers — Split, Linger, Chain, status application
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Side Map: projectile entity ID → set of enemy entity IDs already hit. */
+const projectileHitSets: Map<number, Set<number>> = new Map();
+
+function applyProjectileStatus(pid: number, tid: number) {
+  const statusType = Projectile.statusType[pid];
+  if (statusType === 0) return;
+  if (!hasComponent(world, StatusEffect, tid)) {
+    addComponent(world, StatusEffect, tid);
+  }
+  const types = [StatusEffect.type0, StatusEffect.type1, StatusEffect.type2, StatusEffect.type3];
+  const timers = [StatusEffect.timer0, StatusEffect.timer1, StatusEffect.timer2, StatusEffect.timer3];
+  const mags = [StatusEffect.mag0, StatusEffect.mag1, StatusEffect.mag2, StatusEffect.mag3];
+  for (let i = 0; i < 4; i++) {
+    if (types[i][tid] === statusType || types[i][tid] === 0) {
+      types[i][tid] = statusType;
+      timers[i][tid] = Projectile.statusDuration[pid];
+      mags[i][tid] = Projectile.statusMagnitude[pid];
+      return;
+    }
+  }
+  types[0][tid] = statusType;
+  timers[0][tid] = Projectile.statusDuration[pid];
+  mags[0][tid] = Projectile.statusMagnitude[pid];
+}
+
+function spawnLingeringArea(x: number, y: number, sourcePid: number) {
+  const eid = addEntity(world);
+  addComponent(world, Position, eid);
+  addComponent(world, LingeringArea, eid);
+  addComponent(world, Lifetime, eid);
+  addComponent(world, Team, eid);
+  addComponent(world, Sprite, eid);
+
+  Position.x[eid] = x;
+  Position.y[eid] = y;
+  LingeringArea.damagePerSec[eid] = Projectile.damage[sourcePid] * 0.5;
+  LingeringArea.radius[eid] = 30;
+  LingeringArea.teamId[eid] = Projectile.teamId[sourcePid];
+  LingeringArea.color[eid] = Projectile.color[sourcePid];
+  LingeringArea.statusType[eid] = Projectile.statusType[sourcePid];
+  LingeringArea.statusDuration[eid] = Projectile.statusDuration[sourcePid];
+  LingeringArea.statusMagnitude[eid] = Projectile.statusMagnitude[sourcePid];
+  LingeringArea.tickAccumulator[eid] = 0;
+  Lifetime.remaining[eid] = Projectile.lingerDuration[sourcePid];
+  Team.id[eid] = Projectile.teamId[sourcePid];
+  Sprite.spriteId[eid] = 6;
+  Sprite.zLayer[eid] = 1;
+}
+
+function spawnSplitChildren(parentPid: number, killedTid: number) {
+  if (!entityExists(world, parentPid)) return;
+  const px = Position.x[parentPid];
+  const py = Position.y[parentPid];
+  const baseAngle = Math.atan2(Position.y[killedTid] - py, Position.x[killedTid] - px);
+  for (let i = 0; i < 2; i++) {
+    const angle = baseAngle + (i === 0 ? -0.6 : 0.6);
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
+
+    const eid = addEntity(world);
+    addComponent(world, Position, eid);
+    addComponent(world, Velocity, eid);
+    addComponent(world, Sprite, eid);
+    addComponent(world, Projectile, eid);
+    addComponent(world, Lifetime, eid);
+    addComponent(world, Hitbox, eid);
+    addComponent(world, Team, eid);
+
+    Position.x[eid] = px;
+    Position.y[eid] = py;
+    const parentSpeed = Math.hypot(Velocity.x[parentPid], Velocity.y[parentPid]);
+    Velocity.x[eid] = dirX * parentSpeed * 0.9;
+    Velocity.y[eid] = dirY * parentSpeed * 0.9;
+    Sprite.spriteId[eid] = 1;
+    Sprite.zLayer[eid] = 3;
+    Projectile.damage[eid] = Projectile.damage[parentPid] * 0.5;
+    Projectile.teamId[eid] = Projectile.teamId[parentPid];
+    Projectile.pierceCount[eid] = 0;
+    Projectile.color[eid] = Projectile.color[parentPid];
+    Projectile.accentColor[eid] = Projectile.accentColor[parentPid];
+    Projectile.statusType[eid] = Projectile.statusType[parentPid];
+    Projectile.statusDuration[eid] = Projectile.statusDuration[parentPid];
+    Projectile.statusMagnitude[eid] = Projectile.statusMagnitude[parentPid];
+    Projectile.elementId[eid] = Projectile.elementId[parentPid];
+    Projectile.splitOnKill[eid] = 0;
+    Projectile.lingerDuration[eid] = 0;
+    Projectile.chainCount[eid] = 0;
+    Projectile.growWithDistance[eid] = 0;
+    Projectile.distanceTraveled[eid] = 0;
+    Projectile.baseDamage[eid] = Projectile.damage[eid];
+    Projectile.baseRadius[eid] = Hitbox.radius[parentPid] * 0.7;
+    Lifetime.remaining[eid] = 0.8;
+    Hitbox.radius[eid] = Projectile.baseRadius[eid];
+    Team.id[eid] = Projectile.teamId[parentPid];
+  }
+}
+
+function bounceChain(pid: number, _currentTid: number): boolean {
+  const px = Position.x[pid];
+  const py = Position.y[pid];
+  const bounceRange = 200;
+  let bestDist = bounceRange;
+  let bestTid = -1;
+  const targets = damageableQuery(world);
+  const hitSet = projectileHitSets.get(pid);
+  for (let i = 0; i < targets.length; i++) {
+    const tid = targets[i];
+    if (Team.id[tid] === Projectile.teamId[pid]) continue;
+    if (Health.current[tid] <= 0) continue;
+    if (hitSet && hitSet.has(tid)) continue;
+    const dx = Position.x[tid] - px;
+    const dy = Position.y[tid] - py;
+    const dist = Math.hypot(dx, dy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestTid = tid;
+    }
+  }
+  if (bestTid < 0) return false;
+  const dx = Position.x[bestTid] - px;
+  const dy = Position.y[bestTid] - py;
+  const dist = Math.hypot(dx, dy);
+  const speed = Math.hypot(Velocity.x[pid], Velocity.y[pid]);
+  Velocity.x[pid] = (dx / dist) * speed;
+  Velocity.y[pid] = (dy / dist) * speed;
+  Position.x[pid] += (dx / dist) * 4;
+  Position.y[pid] += (dy / dist) * 4;
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lingering Area System — damages enemies standing in the area
+// ─────────────────────────────────────────────────────────────────────────────
+
+const lingeringQuery = defineQuery([Position, LingeringArea, Lifetime, Team]);
+
+export function lingeringAreaSystem(dt: number) {
+  const areas = lingeringQuery(world);
+  if (areas.length === 0) return;
+  const targets = damageableQuery(world);
+
+  for (let i = 0; i < areas.length; i++) {
+    const aid = areas[i];
+    LingeringArea.tickAccumulator[aid] += dt;
+    if (LingeringArea.tickAccumulator[aid] < 0.25) continue;
+    const tickDmg = LingeringArea.damagePerSec[aid] * LingeringArea.tickAccumulator[aid];
+    LingeringArea.tickAccumulator[aid] = 0;
+
+    const ax = Position.x[aid];
+    const ay = Position.y[aid];
+    const ar = LingeringArea.radius[aid];
+    const areaTeam = LingeringArea.teamId[aid];
+
+    for (let j = 0; j < targets.length; j++) {
+      const tid = targets[j];
+      if (Team.id[tid] === areaTeam) continue;
+      if (Health.current[tid] <= 0) continue;
+      const dx = Position.x[tid] - ax;
+      const dy = Position.y[tid] - ay;
+      const dist = Math.hypot(dx, dy);
+      if (dist < ar + Hitbox.radius[tid]) {
+        Health.current[tid] = Math.max(0, Health.current[tid] - tickDmg);
+        spawnDamageNumber(Position.x[tid], Position.y[tid] - 10, tickDmg, false);
+        if (LingeringArea.statusType[aid] !== 0) {
+          if (!hasComponent(world, StatusEffect, tid)) {
+            addComponent(world, StatusEffect, tid);
+          }
+          const types = [StatusEffect.type0, StatusEffect.type1, StatusEffect.type2, StatusEffect.type3];
+          const timers = [StatusEffect.timer0, StatusEffect.timer1, StatusEffect.timer2, StatusEffect.timer3];
+          const mags = [StatusEffect.mag0, StatusEffect.mag1, StatusEffect.mag2, StatusEffect.mag3];
+          const typeInt = LingeringArea.statusType[aid];
+          for (let s = 0; s < 4; s++) {
+            if (types[s][tid] === typeInt || types[s][tid] === 0) {
+              types[s][tid] = typeInt;
+              timers[s][tid] = LingeringArea.statusDuration[aid];
+              mags[s][tid] = LingeringArea.statusMagnitude[aid];
+              break;
+            }
+          }
+        }
+        if (Health.current[tid] <= 0) {
+          handleDeath(tid);
+        }
+      }
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grow Modifier System — scales projectile damage and radius with travel distance
+// ─────────────────────────────────────────────────────────────────────────────
+
+const growQuery = defineQuery([Position, Velocity, Projectile]);
+
+export function growModifierSystem(dt: number) {
+  const entities = growQuery(world);
+  for (let i = 0; i < entities.length; i++) {
+    const eid = entities[i];
+    if (Projectile.growWithDistance[eid] === 0) continue;
+    const dx = Velocity.x[eid] * dt;
+    const dy = Velocity.y[eid] * dt;
+    const frameDist = Math.hypot(dx, dy);
+    Projectile.distanceTraveled[eid] += frameDist;
+    const growRatio = Math.min(1.5, 1 + Projectile.distanceTraveled[eid] / 400);
+    Projectile.damage[eid] = Projectile.baseDamage[eid] * growRatio;
+    Hitbox.radius[eid] = Projectile.baseRadius[eid] * growRatio;
   }
 }
 
@@ -368,6 +610,8 @@ export function lifetimeSystem(dt: number) {
     const eid = entities[i];
     Lifetime.remaining[eid] -= dt;
     if (Lifetime.remaining[eid] <= 0) {
+      // Clean up any side maps referencing this entity
+      projectileHitSets.delete(eid);
       removeEntity(world, eid);
     }
   }

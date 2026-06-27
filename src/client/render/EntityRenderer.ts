@@ -30,6 +30,7 @@ import {
   Projectile,
   Beam,
   NovaRing,
+  LingeringArea,
 } from "@core/ecs/world";
 
 const spriteQuery = defineQuery([Position, Sprite]);
@@ -207,6 +208,9 @@ export class EntityRenderer {
   // Nova ring VFX — one Graphics per nova, redrawn each frame as it expands
   private novaGraphics: Map<number, Graphics> = new Map();
 
+  // Lingering area VFX — one Graphics per area, redrawn each frame
+  private lingeringGraphics: Map<number, Graphics> = new Map();
+
   constructor() {
     this.container = new Container();
     this.container.label = "Entities";
@@ -230,6 +234,9 @@ export class EntityRenderer {
         return { display: buildEnemySprite() };
       case 5:
         // Nova ring — placeholder container, drawn dynamically in sync()
+        return { display: new Graphics() };
+      case 6:
+        // Lingering area — drawn dynamically in syncLingeringAreas()
         return { display: new Graphics() };
       default:
         return { display: buildProjectileSprite(elementColor, accentColor) };
@@ -370,6 +377,9 @@ export class EntityRenderer {
       }
     }
 
+    // ── Lingering Area VFX ─────────────────────────────────────────────
+    this.syncLingeringAreas();
+
     // ── Beam VFX ───────────────────────────────────────────────────────
     this.syncBeams();
 
@@ -378,6 +388,56 @@ export class EntityRenderer {
 
     // Sort by Y (depth)
     this.container.children.sort((a, b) => a.y - b.y);
+  }
+
+  /**
+   * Sync lingering area VFX. Each area is drawn as a translucent colored circle
+   * that pulses and fades as its lifetime decreases.
+   */
+  private syncLingeringAreas() {
+    const lingeringQuery = defineQuery([Position, LingeringArea, Lifetime]);
+    const areas = lingeringQuery(world);
+    const currentSet = new Set(areas);
+
+    // Remove deleted areas
+    for (const [eid, gfx] of this.lingeringGraphics.entries()) {
+      if (!currentSet.has(eid)) {
+        this.container.removeChild(gfx);
+        gfx.destroy();
+        this.lingeringGraphics.delete(eid);
+      }
+    }
+
+    // Add or update areas
+    for (let i = 0; i < areas.length; i++) {
+      const eid = areas[i];
+      let gfx = this.lingeringGraphics.get(eid);
+      if (!gfx) {
+        gfx = new Graphics();
+        gfx.zIndex = 1;
+        this.container.addChild(gfx);
+        this.lingeringGraphics.set(eid, gfx);
+      }
+
+      const cx = Position.x[eid];
+      const cy = Position.y[eid];
+      const r = LingeringArea.radius[eid];
+      const color = LingeringArea.color[eid];
+      const remaining = Lifetime.remaining[eid];
+      const alpha = Math.min(0.6, (remaining / 2) * 0.6);
+
+      gfx.clear();
+      // Outer aura
+      gfx.circle(cx, cy, r);
+      gfx.fill({ color, alpha: alpha * 0.3 });
+      // Inner ring
+      gfx.circle(cx, cy, r * 0.7);
+      gfx.fill({ color, alpha: alpha * 0.5 });
+      // Animated pulse
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 150);
+      gfx.circle(cx, cy, r * 0.3 * pulse);
+      gfx.fill({ color: 0xffffff, alpha: alpha * 0.4 });
+    }
   }
 
   /**
