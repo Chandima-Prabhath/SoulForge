@@ -334,4 +334,61 @@ export const VoiceOfTheWorld = defineComponent({
   atomId: Types.ui8,
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 7 — Match Mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Minion — AI-controlled unit that walks along a lane and attacks enemies.
+ * Spawned in waves by both player and enemy sides.
+ */
+export const Minion = defineComponent({
+  teamId: Types.ui8,     // 0 = player side, 1 = enemy side
+  hp: Types.f32,
+  maxHp: Types.f32,
+  damage: Types.f32,
+  speed: Types.f32,
+  attackRange: Types.f32,
+  attackCooldown: Types.f32,
+  attackTimer: Types.f32,
+  /** Lane index: 0 = top, 1 = bottom. */
+  lane: Types.ui8,
+  /** Current waypoint index in the lane path. */
+  waypointIndex: Types.ui8,
+  color: Types.ui32,
+  size: Types.f32,
+  /** 0 = melee, 1 = ranged. */
+  minionType: Types.ui8,
+});
+
+/**
+ * Structure — tower or core. Stationary, attacks nearby enemies.
+ */
+export const Structure = defineComponent({
+  teamId: Types.ui8,
+  hp: Types.f32,
+  maxHp: Types.f32,
+  damage: Types.f32,
+  attackRange: Types.f32,
+  attackCooldown: Types.f32,
+  attackTimer: Types.f32,
+  color: Types.ui32,
+  /** 0 = tower, 1 = core. */
+  structureType: Types.ui8,
+  /** Whether this structure is the core (destroying it wins the match). */
+  isCore: Types.ui8,
+});
+
+/**
+ * MatchState — tracks match-level state (timer, wave timer, win/lose).
+ * Singleton entity.
+ */
+export const MatchState = defineComponent({
+  matchTime: Types.f32,
+  waveTimer: Types.f32,
+  waveCount: Types.ui16,
+  /** 0 = ongoing, 1 = player won, 2 = enemy won. */
+  result: Types.ui8,
+});
+
 export type World = IWorld;
