@@ -42,8 +42,8 @@ export interface MatchArena {
 }
 
 export function buildMatchArena(): MatchArena {
-  const W = 44;
-  const H = 44;
+  const W = 72;
+  const H = 72;
   const tiles = new Array(W * H).fill(0);
 
   // Border walls
@@ -83,48 +83,50 @@ export function buildMatchArena(): MatchArena {
     }
   };
 
-  // ── MID LANE: main diagonal (col = row) from (3,3) to (W-4, H-4) ───
-  // This appears as a VERTICAL LINE on screen in isometric projection.
+  // ── MID LANE: main diagonal (col = row) — 3 tiles wide ────────────
   for (let i = 3; i <= W - 4; i++) {
     setLaneTile(i - 1, i - 1);
     setLaneTile(i, i);
     setLaneTile(i + 1, i + 1);
+    // Extra width: offset by 1 perpendicular to diagonal
+    setLaneTile(i, i - 1);
+    setLaneTile(i - 1, i);
   }
 
-  // ── TOP LANE: goes LEFT on screen then UP ──────────────────────────
-  // From player core (W-4, H-4) → go LEFT (decrease col, keep row) →
-  // then UP (keep col, decrease row) → to enemy core (3, 3)
-  const topLaneCol = 5;
-  // Horizontal segment: from (W-5, H-5) going LEFT to (topLaneCol, H-5)
+  // ── TOP LANE: goes LEFT on screen then UP — 3 tiles wide ──────────
+  const topLaneCol = 6;
+  // Horizontal segment at bottom
   for (let c = topLaneCol; c <= W - 5; c++) {
     setLaneTile(c, H - 5);
     setLaneTile(c, H - 6);
+    setLaneTile(c, H - 7);
   }
-  // Vertical segment: from (topLaneCol, H-5) going UP to (topLaneCol, 5)
+  // Vertical segment (going up the left side)
   for (let r = 5; r <= H - 5; r++) {
     setLaneTile(topLaneCol, r);
     setLaneTile(topLaneCol + 1, r);
+    setLaneTile(topLaneCol + 2, r);
   }
-  // Horizontal segment: from (topLaneCol, 5) going RIGHT to (W-5, 5)
+  // Horizontal segment at top
   for (let c = topLaneCol; c <= W - 5; c++) {
     setLaneTile(c, 5);
-    setLaneTile(c, 4);
+    setLaneTile(c, 6);
+    setLaneTile(c, 7);
   }
 
-  // ── BOTTOM LANE: goes RIGHT on screen then UP ──────────────────────
-  // From player core (W-4, H-4) → go RIGHT (keep col, decrease row) →
-  // then UP (decrease col, keep row) → to enemy core (3, 3)
-  const botLaneRow = 5;
-  const botLaneCol = W - 6;
-  // Vertical segment: from (W-5, H-5) going UP to (W-5, botLaneRow)
-  for (let r = botLaneRow; r <= H - 5; r++) {
+  // ── BOTTOM LANE: goes RIGHT on screen then UP — 3 tiles wide ──────
+  const botLaneCol = W - 8;
+  // Vertical segment (going up the right side)
+  for (let r = 5; r <= H - 5; r++) {
     setLaneTile(botLaneCol, r);
     setLaneTile(botLaneCol + 1, r);
+    setLaneTile(botLaneCol + 2, r);
   }
-  // Horizontal segment: from (botLaneCol, botLaneRow) going LEFT to (5, botLaneRow)
+  // Horizontal segment at top
   for (let c = 5; c <= botLaneCol; c++) {
-    setLaneTile(c, botLaneRow);
-    setLaneTile(c, botLaneRow + 1);
+    setLaneTile(c, 5);
+    setLaneTile(c, 6);
+    setLaneTile(c, 7);
   }
 
   // ── Jungle: water + rocks in the neutral band ──────────────────────
@@ -154,23 +156,26 @@ export function buildMatchArena(): MatchArena {
   }
 
   // ── Structure Positions ────────────────────────────────────────────
-  // Player core: bottom-center on screen = (W-4, H-4) in tiles
   const playerCore = { col: W - 4, row: H - 4 };
-  // Enemy core: top-center on screen = (3, 3) in tiles
   const enemyCore = { col: 3, row: 3 };
 
-  // Player towers (1 per lane, in player territory)
+  // 2 towers per lane per side (6 per side = 12 total)
   const playerTowers = [
-    { col: topLaneCol, row: H - 8 },              // top lane (left side on screen)
-    { col: Math.floor((W + H) / 2) - 2, row: Math.floor((W + H) / 2) - 2 }, // mid lane
-    { col: W - 8, row: topLaneCol },              // bottom lane (right side on screen)
+    { col: topLaneCol, row: H - 12 },              // top lane outer
+    { col: topLaneCol, row: Math.floor(H * 0.5) }, // top lane inner
+    { col: Math.floor(W * 0.6), row: Math.floor(H * 0.6) }, // mid lane outer
+    { col: Math.floor(W * 0.55), row: Math.floor(H * 0.55) }, // mid lane inner
+    { col: W - 12, row: topLaneCol },              // bottom lane outer
+    { col: Math.floor(H * 0.5), row: topLaneCol },  // bottom lane inner
   ];
 
-  // Enemy towers (1 per lane, in enemy territory)
   const enemyTowers = [
-    { col: topLaneCol, row: 8 },                  // top lane
-    { col: 8, row: 8 },                           // mid lane
-    { col: 8, row: topLaneCol },                  // bottom lane
+    { col: topLaneCol, row: 11 },                   // top lane outer
+    { col: topLaneCol, row: Math.floor(H * 0.5) }, // top lane inner
+    { col: Math.floor(W * 0.4), row: Math.floor(H * 0.4) }, // mid lane outer
+    { col: Math.floor(W * 0.45), row: Math.floor(H * 0.45) }, // mid lane inner
+    { col: 11, row: topLaneCol },                   // bottom lane outer
+    { col: Math.floor(H * 0.5), row: topLaneCol },  // bottom lane inner
   ];
 
   // Mark structures
@@ -180,22 +185,21 @@ export function buildMatchArena(): MatchArena {
   for (const t of enemyTowers) tiles[t.row * W + t.col] = 4;
 
   // ── Lane Waypoints ─────────────────────────────────────────────────
-  // Player minions go from player core → enemy core
-  // Enemy minions go from enemy core → player core (reverse)
-
   // TOP lane: player core → LEFT → UP → enemy core
   const topLane = [
-    { col: W - 5, row: H - 5 },           // start at player core
-    { col: topLaneCol + 1, row: H - 5 },  // go LEFT (decrease col)
-    { col: topLaneCol + 1, row: Math.floor(H / 2) }, // go UP (decrease row)
-    { col: topLaneCol + 1, row: 5 },      // reach top
-    { col: 5, row: 5 },                   // go RIGHT along top
-    { col: enemyCore.col + 1, row: enemyCore.row + 1 }, // arrive at enemy core
+    { col: W - 5, row: H - 5 },
+    { col: topLaneCol + 1, row: H - 5 },
+    { col: topLaneCol + 1, row: Math.floor(H * 0.75) },
+    { col: topLaneCol + 1, row: Math.floor(H * 0.5) },
+    { col: topLaneCol + 1, row: Math.floor(H * 0.25) },
+    { col: topLaneCol + 1, row: 6 },
+    { col: Math.floor(W * 0.25), row: 6 },
+    { col: enemyCore.col + 1, row: enemyCore.row + 1 },
   ];
 
   // MID lane: main diagonal from player core to enemy core
   const midLane = [];
-  const midSteps = 7;
+  const midSteps = 8;
   for (let i = 0; i <= midSteps; i++) {
     const t = i / midSteps;
     midLane.push({
@@ -206,12 +210,13 @@ export function buildMatchArena(): MatchArena {
 
   // BOTTOM lane: player core → RIGHT → UP → enemy core
   const bottomLane = [
-    { col: W - 5, row: H - 5 },           // start at player core
-    { col: W - 5, row: Math.floor(H / 2) }, // go UP (decrease row, same col = moves RIGHT on screen)
-    { col: W - 5, row: botLaneRow + 1 },  // reach top-right
-    { col: Math.floor(W / 2), row: botLaneRow + 1 }, // go LEFT along top
-    { col: 5, row: botLaneRow + 1 },      // continue LEFT
-    { col: enemyCore.col + 1, row: enemyCore.row + 1 }, // arrive at enemy core
+    { col: W - 5, row: H - 5 },
+    { col: W - 5, row: Math.floor(H * 0.75) },
+    { col: botLaneCol, row: Math.floor(H * 0.5) },
+    { col: botLaneCol, row: Math.floor(H * 0.25) },
+    { col: botLaneCol, row: 6 },
+    { col: Math.floor(W * 0.75), row: 6 },
+    { col: enemyCore.col + 1, row: enemyCore.row + 1 },
   ];
 
   const playerStart = { col: W - 5, row: H - 5 };
