@@ -67,7 +67,9 @@ import {
 import { defineQuery, hasComponent } from "bitecs";
 import { world, PlayerTag, Health, DevourProgress, EnemyAI } from "@core/ecs/world";
 import { SanctumUI } from "./ui/SanctumUI";
+import { PrologueUI } from "./ui/PrologueUI";
 import { playerSkills, rebuildSkillStatsCache } from "@core/ecs/systems/skillSystems";
+import { REALM_INTROS } from "@data/narrative";
 
 const playerDeathCheckQuery = defineQuery([PlayerTag, Health]);
 
@@ -92,6 +94,9 @@ export class GameApp {
 
   // Phase 5: Sanctum UI
   private sanctumUI!: SanctumUI;
+
+  // Phase 6: Prologue UI
+  private prologueUI!: PrologueUI;
 
   constructor() {
     this.app = new Application();
@@ -154,6 +159,22 @@ export class GameApp {
 
     // Phase 5: Initialize Sanctum UI
     this.sanctumUI = new SanctumUI(this.runState, () => this.descendFromSanctum());
+
+    // Phase 6: Initialize Prologue UI (shown on first load)
+    this.prologueUI = new PrologueUI(() => {
+      // Show the realm intro notification after prologue completes
+      if (this.currentRealm) {
+        const intro = REALM_INTROS[this.currentRealm.biome];
+        if (intro) {
+          spawnVoiceOfTheWorld(7, 2);
+          console.log(`%c${intro.intro}`, "color: #8888a0; font-style: italic;");
+          console.log(`%c${intro.sageComment}`, "color: #d0a0ff; font-style: italic;");
+        }
+      }
+    });
+
+    // Show prologue on first load (before the game loop starts)
+    this.prologueUI.start();
 
     // Handle window resize
     window.addEventListener("resize", () => {
@@ -339,6 +360,16 @@ export class GameApp {
     // Generate and load the new realm
     this.generateAndLoadRealm();
 
+    // Phase 6: Show realm intro narrative
+    if (this.currentRealm) {
+      const intro = REALM_INTROS[this.currentRealm.biome];
+      if (intro) {
+        spawnVoiceOfTheWorld(7, 2);
+        console.log(`%c${intro.intro}`, "color: #8888a0; font-style: italic;");
+        console.log(`%c${intro.sageComment}`, "color: #d0a0ff; font-style: italic;");
+      }
+    }
+
     // Update HUD with new realm name
     if (this.hud && this.currentRealm) {
       this.hud.setRealmName(this.currentRealm.name);
@@ -400,6 +431,12 @@ export class GameApp {
 
   private tick = () => {
     if (!this.running) return;
+
+    // Phase 6: Pause simulation while the Prologue is playing
+    if (this.prologueUI && this.prologueUI.isPlaying()) {
+      this.lastTime = performance.now();
+      return;
+    }
 
     // Phase 5: Pause simulation while the Sanctum is open
     if (this.sanctumUI && this.sanctumUI.isVisible()) {

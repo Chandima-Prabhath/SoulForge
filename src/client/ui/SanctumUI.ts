@@ -29,6 +29,7 @@ import type {
   ModifierId,
 } from "@core/grammar/types";
 import { ELEMENTS, FORMS, VECTORS, MODIFIERS } from "@data/grammar";
+import { SAGE_LINES, getRandomDeathQuote } from "@data/narrative";
 import { computeSkillStats, describeSkill } from "@core/grammar/compute";
 
 export class SanctumUI {
@@ -127,6 +128,9 @@ export class SanctumUI {
             <span style="color:#e0e0e8;">Modifiers:</span> ${unlockedMods.join(", ") || "—"}
           </div>
         </div>
+
+        <!-- Sage Dialogue -->
+        ${this.renderSageSection()}
 
         <!-- Two-column layout -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
@@ -346,6 +350,87 @@ export class SanctumUI {
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Grimoire Section
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Sage Dialogue Section — the Inner Sage speaks to the player
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private renderSageSection(): string {
+    const dp = this.runState.devourProgress;
+    let condition: "first_sanctum" | "return_sanctum" | "low_atoms" | "many_atoms" | "boss_killed" = "return_sanctum";
+
+    if (!this.runState.hasDied) {
+      condition = "first_sanctum";
+    } else if (dp.totalDevoured < 3) {
+      condition = "low_atoms";
+    } else if (dp.totalDevoured >= 8) {
+      condition = "many_atoms";
+    }
+
+    const sageLine = SAGE_LINES.find((l) => l.condition === condition);
+    const dialogue = sageLine?.text ?? SAGE_LINES[0].text;
+    const deathQuote = this.runState.hasDied ? getRandomDeathQuote() : null;
+
+    return `
+      <div style="
+        background: linear-gradient(135deg, rgba(30,20,45,0.8) 0%, rgba(20,15,30,0.8) 100%);
+        border: 1px solid rgba(144,64,255,0.3);
+        border-radius: 10px;
+        padding: 20px;
+        margin-bottom: 20px;
+        position: relative;
+        overflow: hidden;
+      ">
+        <div style="
+          position: absolute;
+          top: 0; left: 0; right: 0; bottom: 0;
+          background: radial-gradient(circle at 30% 50%, rgba(144,64,255,0.08) 0%, transparent 70%);
+          pointer-events: none;
+        "></div>
+        <div style="display: flex; align-items: flex-start; gap: 16px; position: relative;">
+          <div style="
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #d0a0ff 0%, #9040ff 60%, #4a2060 100%);
+            border: 2px solid #d0a0ff;
+            box-shadow: 0 0 20px rgba(144,64,255,0.4);
+            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px;
+          ">✦</div>
+          <div style="flex: 1;">
+            <div style="
+              color: #d0a0ff;
+              font-size: 12px;
+              letter-spacing: 0.1em;
+              text-transform: uppercase;
+              margin-bottom: 8px;
+              font-weight: 600;
+            ">Inner Sage</div>
+            <div style="
+              color: #e8e8f0;
+              font-size: 14px;
+              line-height: 1.6;
+              font-family: Georgia, serif;
+              font-style: italic;
+            ">${dialogue}</div>
+            ${deathQuote ? `
+              <div style="
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid rgba(255,255,255,0.08);
+                color: #ff8080;
+                font-size: 12px;
+                font-family: Georgia, serif;
+                font-style: italic;
+                opacity: 0.8;
+              ">${deathQuote}</div>
+            ` : ""}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────────
 
   private renderGrimoireSection(): string {
