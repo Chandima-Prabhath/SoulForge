@@ -1,24 +1,37 @@
 /**
- * Match Mode Data — defines the arena, minions, and structures for the
- * AoV-inspired quick-play mode.
+ * Match Mode Data — MOBA-style arena inspired by Arena of Valor.
  *
- * Phase 7.5: Redesigned arena with clear team territories.
- *   - Player side (bottom-left): blue-tinted tiles
- *   - Enemy side (top-right): red-tinted tiles
- *   - Neutral center: default grass
- *   - Lanes are wide and clearly visible
- *   - Structures are placed at strategic chokepoints
+ * Map Layout (isometric, 40x40):
+ *
+ *     ENEMY BASE (top)
+ *     ┌─────────────────┐
+ *     │   [Core]        │
+ *     │  /    \         │
+ *     │ T1    T1        │  ← enemy towers
+ *     │ |      |        │
+ *     │ |  JUNGLE  |    │  ← neutral zone
+ *     │ |      |        │
+ *     │ T2    T2        │  ← player towers
+ *     │  \    /         │
+ *     │   [Core]        │
+ *     └─────────────────┘
+ *     PLAYER BASE (bottom)
+ *
+ * Top lane: goes from player core UP the LEFT side to enemy core
+ * Bottom lane: goes from player core UP the RIGHT side to enemy core
+ * Towers placed along each lane (2 per side)
+ * Jungle in the middle (neutral, rocks for cover)
  *
  * Tile codes:
  *   0 = grass (neutral)
- *   1 = path (lane — walkable)
+ *   1 = path (lane)
  *   2 = rock (obstacle)
- *   3 = water (obstacle)
+ *   3 = water (obstacle, jungle river)
  *   4 = accent (structure base)
- *   5 = player territory (blue-tinted grass)
- *   6 = enemy territory (red-tinted grass)
- *   7 = player path (blue-tinted lane)
- *   8 = enemy path (red-tinted lane)
+ *   5 = player territory (blue-tinted)
+ *   6 = enemy territory (red-tinted)
+ *   7 = player lane path (blue-tinted)
+ *   8 = enemy lane path (red-tinted)
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,22 +40,22 @@
 
 export const TEAM_COLORS = {
   player: {
-    primary: 0x4080ff,   // blue
-    secondary: 0x60a0ff, // lighter blue
+    primary: 0x4080ff,
+    secondary: 0x60a0ff,
     minion: 0x4080ff,
     structure: 0x3060c0,
     core: 0x40c0ff,
-    territory: 0x2a3a5a,  // blue-tinted grass
-    path: 0x4a5a8a,       // blue-tinted path
+    territory: 0x2a3a5a,
+    path: 0x4a5a8a,
   },
   enemy: {
-    primary: 0xff4040,   // red
-    secondary: 0xff6060, // lighter red
+    primary: 0xff4040,
+    secondary: 0xff6060,
     minion: 0xff4040,
     structure: 0xc03030,
     core: 0xff4060,
-    territory: 0x5a2a2a,  // red-tinted grass
-    path: 0x8a4a4a,       // red-tinted path
+    territory: 0x5a2a2a,
+    path: 0x8a4a4a,
   },
 };
 
@@ -64,9 +77,13 @@ export interface MatchArena {
 }
 
 /**
- * Build a match arena — 40x40 tiles for more space.
- * Player territory is bottom-left (blue), enemy territory is top-right (red).
- * Diagonal split creates a clear visual divide.
+ * Build a MOBA-style arena.
+ *
+ * The map is 40x40 tiles. Player base is at bottom-center, enemy base
+ * is at top-center. Two lanes curve from bottom to top:
+ *   - Top lane: goes up the LEFT side
+ *   - Bottom lane: goes up the RIGHT side
+ * Jungle (rocks + water) fills the middle.
  */
 export function buildMatchArena(): MatchArena {
   const W = 40;
@@ -81,100 +98,154 @@ export function buildMatchArena(): MatchArena {
     tiles[i * W + (W - 1)] = 2;
   }
 
-  // Diagonal territory split: player (bottom-left) vs enemy (top-right)
-  // tiles code 5 = player territory, 6 = enemy territory
+  // ── Territory: bottom 40% = player (blue), top 40% = enemy (red) ───
+  const playerZoneEnd = Math.floor(H * 0.4);   // rows 0-15: enemy
+  const enemyZoneStart = Math.floor(H * 0.6);   // rows 24-39: player
+  // Middle (rows 16-23) = neutral jungle
+
   for (let r = 1; r < H - 1; r++) {
     for (let c = 1; c < W - 1; c++) {
-      // Diagonal: r + c < W means bottom-left (player), else top-right (enemy)
-      if (r + c > W + 2) {
-        tiles[r * W + c] = 6; // enemy territory
-      } else if (r + c < W - 2) {
-        tiles[r * W + c] = 5; // player territory
+      if (r > enemyZoneStart) {
+        tiles[r * W + c] = 5; // player territory (blue)
+      } else if (r < playerZoneEnd) {
+        tiles[r * W + c] = 6; // enemy territory (red)
       }
-      // Middle band stays neutral grass (0)
+      // Middle stays neutral (0)
     }
   }
 
-  // ── Top lane (horizontal, upper third) ─────────────────────────────
-  const topLaneY = Math.floor(H * 0.3);
-  for (let x = 2; x < W - 2; x++) {
-    // Player side of lane = blue path (7), enemy side = red path (8)
-    if (x < W / 2) {
-      tiles[topLaneY * W + x] = 7;
-      tiles[(topLaneY + 1) * W + x] = 7;
-    } else {
-      tiles[topLaneY * W + x] = 8;
-      tiles[(topLaneY + 1) * W + x] = 8;
+  // ── Top Lane: goes up the LEFT side ────────────────────────────────
+  // Vertical segment (left side, from player core up to enemy core)
+  const leftLaneX = Math.floor(W * 0.25); // col 10
+  for (let r = 3; r < H - 3; r++) {
+    for (let dx = 0; dx < 2; dx++) {
+      const x = leftLaneX + dx;
+      if (x > 1 && x < W - 2) {
+        // Color based on territory
+        if (r > enemyZoneStart) {
+          tiles[r * W + x] = 7; // player path (blue)
+        } else if (r < playerZoneEnd) {
+          tiles[r * W + x] = 8; // enemy path (red)
+        } else {
+          tiles[r * W + x] = 1; // neutral path
+        }
+      }
+    }
+  }
+  // Horizontal connectors at top and bottom of left lane
+  // Bottom: connect to player core area
+  for (let x = leftLaneX; x < Math.floor(W / 2); x++) {
+    for (let dy = 0; dy < 2; dy++) {
+      const y = H - 5 + dy;
+      if (y < H - 1) tiles[y * W + x] = 7; // player path
+    }
+  }
+  // Top: connect to enemy core area
+  for (let x = leftLaneX; x < Math.floor(W / 2); x++) {
+    for (let dy = 0; dy < 2; dy++) {
+      const y = 3 + dy;
+      if (y > 0) tiles[y * W + x] = 8; // enemy path
     }
   }
 
-  // ── Bottom lane (horizontal, lower third) ──────────────────────────
-  const bottomLaneY = Math.floor(H * 0.7);
-  for (let x = 2; x < W - 2; x++) {
-    if (x < W / 2) {
-      tiles[bottomLaneY * W + x] = 7;
-      tiles[(bottomLaneY + 1) * W + x] = 7;
-    } else {
-      tiles[bottomLaneY * W + x] = 8;
-      tiles[(bottomLaneY + 1) * W + x] = 8;
+  // ── Bottom Lane: goes up the RIGHT side ────────────────────────────
+  const rightLaneX = Math.floor(W * 0.75); // col 30
+  for (let r = 3; r < H - 3; r++) {
+    for (let dx = 0; dx < 2; dx++) {
+      const x = rightLaneX + dx;
+      if (x > 1 && x < W - 2) {
+        if (r > enemyZoneStart) {
+          tiles[r * W + x] = 7; // player path (blue)
+        } else if (r < playerZoneEnd) {
+          tiles[r * W + x] = 8; // enemy path (red)
+        } else {
+          tiles[r * W + x] = 1; // neutral path
+        }
+      }
+    }
+  }
+  // Bottom: connect to player core area
+  for (let x = Math.floor(W / 2); x <= rightLaneX + 1; x++) {
+    for (let dy = 0; dy < 2; dy++) {
+      const y = H - 5 + dy;
+      if (y < H - 1 && x < W - 1) tiles[y * W + x] = 7;
+    }
+  }
+  // Top: connect to enemy core area
+  for (let x = Math.floor(W / 2); x <= rightLaneX + 1; x++) {
+    for (let dy = 0; dy < 2; dy++) {
+      const y = 3 + dy;
+      if (y > 0 && x < W - 1) tiles[y * W + x] = 8;
     }
   }
 
-  // ── Vertical connector in the middle ───────────────────────────────
-  const midX = Math.floor(W / 2);
-  for (let y = topLaneY + 2; y < bottomLaneY - 1; y++) {
-    tiles[y * W + midX] = 1;
-    tiles[y * W + midX + 1] = 1;
+  // ── Jungle (middle neutral zone) ───────────────────────────────────
+  // Water river across the middle
+  const riverY = Math.floor(H / 2);
+  for (let x = leftLaneX + 3; x < rightLaneX - 1; x++) {
+    tiles[riverY * W + x] = 3; // water
+    tiles[(riverY + 1) * W + x] = 3;
   }
-
-  // ── Rock clusters for cover (in neutral zone) ──────────────────────
-  const rocks: Array<[number, number]> = [
-    [12, 12], [13, 12], [12, 13],
-    [26, 10], [27, 10], [26, 11],
-    [10, 26], [11, 26], [10, 27],
-    [27, 28], [28, 28], [27, 29],
-    [19, 19], [20, 19], [19, 20],
-    [15, 24], [16, 24],
-    [23, 15], [24, 15],
+  // Rock clusters in jungle
+  const jungleRocks: Array<[number, number]> = [
+    [14, 16], [15, 16], [14, 17], [16, 17],
+    [24, 16], [25, 16], [24, 17], [23, 17],
+    [14, 22], [15, 22], [14, 21], [16, 21],
+    [24, 22], [25, 22], [24, 21], [23, 21],
+    [19, 14], [20, 14], [19, 24], [20, 24],
   ];
-  for (const [c, r] of rocks) {
+  for (const [c, r] of jungleRocks) {
     if (c > 1 && c < W - 2 && r > 1 && r < H - 2) {
-      tiles[r * W + c] = 2;
+      tiles[r * W + c] = 2; // rock
     }
   }
 
-  // ── Structure positions ────────────────────────────────────────────
-  const playerCore = { col: 4, row: H - 5 };
-  const enemyCore = { col: W - 5, row: 4 };
+  // ── Structure Positions ────────────────────────────────────────────
+  // Player core: bottom-center
+  const playerCore = { col: Math.floor(W / 2), row: H - 4 };
+  // Enemy core: top-center
+  const enemyCore = { col: Math.floor(W / 2), row: 3 };
+
+  // Player towers: one on each lane, in player territory
   const playerTowers = [
-    { col: 8, row: H - 8 },           // bottom lane tower
-    { col: 8, row: topLaneY + 1 },    // top lane tower
-  ];
-  const enemyTowers = [
-    { col: W - 9, row: 7 },           // top lane tower
-    { col: W - 9, row: bottomLaneY }, // bottom lane tower
+    { col: leftLaneX, row: H - 10 },   // top lane tower
+    { col: rightLaneX, row: H - 10 },  // bottom lane tower
   ];
 
-  // Mark structures with accent tiles (4)
+  // Enemy towers: one on each lane, in enemy territory
+  const enemyTowers = [
+    { col: leftLaneX, row: 9 },        // top lane tower
+    { col: rightLaneX, row: 9 },       // bottom lane tower
+  ];
+
+  // Mark structures with accent tiles
   tiles[playerCore.row * W + playerCore.col] = 4;
   tiles[enemyCore.row * W + enemyCore.col] = 4;
   for (const t of playerTowers) tiles[t.row * W + t.col] = 4;
   for (const t of enemyTowers) tiles[t.row * W + t.col] = 4;
 
-  // ── Lane waypoints (for minion movement) ───────────────────────────
-  // Player minions go left→right, enemy minions go right→left
+  // ── Lane Waypoints (for minion movement) ───────────────────────────
+  // Player minions go from bottom→top, enemy minions go from top→bottom
+  // Top lane (left side): bottom → left → top
   const topLane = [
-    { col: 5, row: topLaneY + 1 },
-    { col: Math.floor(W / 2), row: topLaneY + 1 },
-    { col: W - 5, row: topLaneY + 1 },
-  ];
-  const bottomLane = [
-    { col: 5, row: bottomLaneY + 1 },
-    { col: Math.floor(W / 2), row: bottomLaneY + 1 },
-    { col: W - 5, row: bottomLaneY + 1 },
+    { col: Math.floor(W / 2), row: H - 5 },   // start at player core
+    { col: leftLaneX + 1, row: H - 5 },        // move left
+    { col: leftLaneX + 1, row: Math.floor(H / 2) }, // move up through jungle
+    { col: leftLaneX + 1, row: 4 },            // reach enemy area
+    { col: Math.floor(W / 2), row: 4 },        // move to enemy core
   ];
 
-  const playerStart = { col: 5, row: H - 8 };
+  // Bottom lane (right side): bottom → right → top
+  const bottomLane = [
+    { col: Math.floor(W / 2), row: H - 5 },   // start at player core
+    { col: rightLaneX, row: H - 5 },           // move right
+    { col: rightLaneX, row: Math.floor(H / 2) }, // move up through jungle
+    { col: rightLaneX, row: 4 },               // reach enemy area
+    { col: Math.floor(W / 2), row: 4 },        // move to enemy core
+  ];
+
+  // Player starts near their core
+  const playerStart = { col: Math.floor(W / 2), row: H - 6 };
 
   return {
     width: W,

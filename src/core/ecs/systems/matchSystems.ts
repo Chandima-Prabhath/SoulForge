@@ -1,9 +1,19 @@
 /**
- * Match Systems — minion spawning, minion AI, structure attacks, win/lose.
+ * Match Systems — MOBA-style minion AI, structure AI, win/lose.
  *
- * Phase 7: Match Mode logic. Separate from the roguelite realm systems.
- * The player enters match mode from a mode-select screen, plays a 10-20 min
- * match, then returns to the Sanctum with rewards.
+ * Phase 7.5: Complete rewrite with proper MOBA behavior.
+ *
+ * Structure AI (towers + cores):
+ *   - Attack ANY enemy in range (player + minions)
+ *   - Prioritize player if in range (like real MOBAs)
+ *   - Otherwise attack nearest minion
+ *
+ * Minion AI:
+ *   - Follow lane waypoints from spawn to enemy core
+ *   - If enemy in aggro range, stop and attack
+ *   - If enemy dies or leaves range, resume following waypoints
+ *   - NEVER stand still doing nothing — always moving or attacking
+ *   - Player minions go bottom→top, enemy minions go top→bottom
  */
 
 import { addEntity, addComponent, defineQuery, hasComponent, removeEntity } from "bitecs";
@@ -15,6 +25,7 @@ import {
   Health,
   Hitbox,
   Team,
+  PlayerTag,
   Minion,
   Structure,
   MatchState,
@@ -37,6 +48,7 @@ import { spawnDamageNumber, handleDeath } from "./combatSystems";
 const minionQuery = defineQuery([Position, Minion, Health]);
 const structureQuery = defineQuery([Position, Structure, Health]);
 const matchStateQuery = defineQuery([MatchState]);
+const playerQuery = defineQuery([Position, PlayerTag, Health]);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Match Arena + State
@@ -44,13 +56,9 @@ const matchStateQuery = defineQuery([MatchState]);
 
 let matchArena: MatchArena | null = null;
 
-/**
- * Start a new match — build arena, spawn structures, init match state.
- */
 export function startMatch() {
   matchArena = buildMatchArena();
 
-  // Create match state entity
   const stateEid = addEntity(world);
   addComponent(world, MatchState, stateEid);
   MatchState.matchTime[stateEid] = 0;
@@ -58,21 +66,17 @@ export function startMatch() {
   MatchState.waveCount[stateEid] = 0;
   MatchState.result[stateEid] = 0;
 
-  // Spawn structures
   if (!matchArena) return;
 
-  // Player towers
+  // Spawn structures
   for (const tower of matchArena.playerTowers) {
     spawnStructure(tower.col, tower.row, 0, "tower");
   }
-  // Player core
   spawnStructure(matchArena.playerCore.col, matchArena.playerCore.row, 0, "core");
 
-  // Enemy towers
   for (const tower of matchArena.enemyTowers) {
     spawnStructure(tower.col, tower.row, 1, "tower");
   }
-  // Enemy core
   spawnStructure(matchArena.enemyCore.col, matchArena.enemyCore.row, 1, "core");
 
   console.log(
@@ -82,32 +86,17 @@ export function startMatch() {
   );
 }
 
-/**
- * Get the current match arena (for rendering + spawning player).
- */
 export function getMatchArena(): MatchArena | null {
   return matchArena;
 }
 
-/**
- * End the match — clean up all match entities.
- */
 export function endMatch() {
-  // Remove all minions
   const minions = minionQuery(world);
-  for (let i = 0; i < minions.length; i++) {
-    removeEntity(world, minions[i]);
-  }
-  // Remove all structures
+  for (let i = 0; i < minions.length; i++) removeEntity(world, minions[i]);
   const structures = structureQuery(world);
-  for (let i = 0; i < structures.length; i++) {
-    removeEntity(world, structures[i]);
-  }
-  // Remove match state
+  for (let i = 0; i < structures.length; i++) removeEntity(world, structures[i]);
   const states = matchStateQuery(world);
-  for (let i = 0; i < states.length; i++) {
-    removeEntity(world, states[i]);
-  }
+  for (let i = 0; i < states.length; i++) removeEntity(world, states[i]);
   matchArena = null;
 }
 
@@ -128,7 +117,7 @@ function spawnStructure(col: number, row: number, teamId: number, type: "tower" 
   const w = tileToWorld(col, row);
   Position.x[eid] = w.x;
   Position.y[eid] = w.y;
-  Sprite.spriteId[eid] = 8; // 8 = structure
+  Sprite.spriteId[eid] = 8;
   Sprite.zLayer[eid] = 2;
   Health.current[eid] = def.hp;
   Health.max[eid] = def.hp;
@@ -141,12 +130,10 @@ function spawnStructure(col: number, row: number, teamId: number, type: "tower" 
   Structure.attackRange[eid] = def.attackRange;
   Structure.attackCooldown[eid] = def.attackCooldown;
   Structure.attackTimer[eid] = 0;
-  // Team-colored: blue for player, red for enemy
   const teamColor = teamId === 0 ? TEAM_COLORS.player : TEAM_COLORS.enemy;
   Structure.color[eid] = type === "core" ? teamColor.core : teamColor.structure;
   Structure.structureType[eid] = type === "core" ? 1 : 0;
   Structure.isCore[eid] = type === "core" ? 1 : 0;
-
   return eid;
 }
 
@@ -176,7 +163,7 @@ function spawnMinion(
   Position.y[eid] = w.y;
   Velocity.x[eid] = 0;
   Velocity.y[eid] = 0;
-  Sprite.spriteId[eid] = 9; // 9 = minion
+  Sprite.spriteId[eid] = 9;
   Sprite.zLayer[eid] = 2;
   Health.current[eid] = def.hp;
   Health.max[eid] = def.hp;
@@ -191,113 +178,82 @@ function spawnMinion(
   Minion.attackCooldown[eid] = def.attackCooldown;
   Minion.attackTimer[eid] = 0;
   Minion.lane[eid] = lane;
-  Minion.waypointIndex[eid] = 0;
-  // Team-colored: blue for player minions, red for enemy minions
+  // Player minions start at waypoint 0 (going forward)
+  // Enemy minions start at the LAST waypoint (going backward)
+  Minion.waypointIndex[eid] = teamId === 0 ? 0 : 4;
   Minion.color[eid] = teamId === 0 ? TEAM_COLORS.player.minion : TEAM_COLORS.enemy.minion;
   Minion.size[eid] = def.size;
   Minion.minionType[eid] = type === "ranged" ? 1 : 0;
 }
 
-/**
- * Spawn a wave of minions for both teams.
- */
 function spawnWave() {
   if (!matchArena) return;
-
   const count = DEFAULT_MATCH_CONFIG.minionsPerLane;
 
-  // Player minions (bottom-left, moving toward top-right)
+  // Player minions spawn at player core, go toward enemy core
   for (let i = 0; i < count; i++) {
-    // Top lane
-    spawnMinion(
-      matchArena.playerStart.col + i,
-      matchArena.playerStart.row - 2,
-      0, // player team
-      0, // top lane
-      i === count - 1 ? "ranged" : "melee"
-    );
-    // Bottom lane
-    spawnMinion(
-      matchArena.playerStart.col + i,
-      matchArena.playerStart.row,
-      0,
-      1, // bottom lane
-      i === count - 1 ? "ranged" : "melee"
-    );
+    spawnMinion(matchArena.playerCore.col + i - 1, matchArena.playerCore.row - 2, 0, 0, i === count - 1 ? "ranged" : "melee");
+    spawnMinion(matchArena.playerCore.col + i - 1, matchArena.playerCore.row - 2, 0, 1, i === count - 1 ? "ranged" : "melee");
   }
 
-  // Enemy minions (top-right, moving toward bottom-left)
+  // Enemy minions spawn at enemy core, go toward player core
   for (let i = 0; i < count; i++) {
-    // Top lane (enemy side)
-    spawnMinion(
-      matchArena.enemyCore.col - i,
-      matchArena.enemyCore.row + 2,
-      1, // enemy team
-      0, // top lane
-      i === count - 1 ? "ranged" : "melee"
-    );
-    // Bottom lane (enemy side)
-    spawnMinion(
-      matchArena.enemyCore.col - i,
-      matchArena.enemyCore.row,
-      1,
-      1,
-      i === count - 1 ? "ranged" : "melee"
-    );
+    spawnMinion(matchArena.enemyCore.col + i - 1, matchArena.enemyCore.row + 2, 1, 0, i === count - 1 ? "ranged" : "melee");
+    spawnMinion(matchArena.enemyCore.col + i - 1, matchArena.enemyCore.row + 2, 1, 1, i === count - 1 ? "ranged" : "melee");
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Match State System — timer + wave spawning + win/lose check
+// Match State System — timer + wave spawning + win/lose
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function matchStateSystem(dt: number) {
   const states = matchStateQuery(world);
   if (states.length === 0) return;
   const stateEid = states[0];
-
-  // Already ended
   if (MatchState.result[stateEid] !== 0) return;
 
-  // Update timers
   MatchState.matchTime[stateEid] += dt;
   MatchState.waveTimer[stateEid] -= dt;
 
-  // Spawn waves
   if (MatchState.waveTimer[stateEid] <= 0) {
     MatchState.waveTimer[stateEid] = DEFAULT_MATCH_CONFIG.waveInterval;
     MatchState.waveCount[stateEid] += 1;
     spawnWave();
-    console.log(
-      `%c[Match] %cWave ${MatchState.waveCount[stateEid]} spawned!`,
-      "color: #ffb86c; font-weight: bold;",
-      "color: #e0e0e8;"
-    );
+    console.log(`%c[Match] %cWave ${MatchState.waveCount[stateEid]} spawned!`, "color: #ffb86c; font-weight: bold;", "color: #e0e0e8;");
   }
 
-  // Check win/lose conditions
+  // Check win/lose
   const structures = structureQuery(world);
   let playerCoreAlive = false;
   let enemyCoreAlive = false;
   for (let i = 0; i < structures.length; i++) {
     const sid = structures[i];
-    if (Structure.isCore[sid] === 1) {
-      if (Structure.teamId[sid] === 0 && Health.current[sid] > 0) playerCoreAlive = true;
-      if (Structure.teamId[sid] === 1 && Health.current[sid] > 0) enemyCoreAlive = true;
+    if (Structure.isCore[sid] === 1 && Health.current[sid] > 0) {
+      if (Structure.teamId[sid] === 0) playerCoreAlive = true;
+      if (Structure.teamId[sid] === 1) enemyCoreAlive = true;
     }
   }
 
   if (!enemyCoreAlive) {
-    MatchState.result[stateEid] = 1; // player won
+    MatchState.result[stateEid] = 1;
     console.log("%c[Match] %cVICTORY! Enemy core destroyed.", "color: #40ff40; font-weight: bold;", "color: #e0e0e8;");
   } else if (!playerCoreAlive) {
-    MatchState.result[stateEid] = 2; // enemy won
+    MatchState.result[stateEid] = 2;
     console.log("%c[Match] %cDEFEAT! Your core was destroyed.", "color: #ff4040; font-weight: bold;", "color: #e0e0e8;");
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Minion AI System — walk along lane, attack enemies in range
+// Minion AI System — MOBA-style
+//
+// Each minion:
+//   1. If enemy in aggro range → move toward + attack
+//   2. If no enemy in range → follow lane waypoints toward enemy core
+//   3. NEVER stand still — always moving or attacking
+//
+// Player minions: follow waypoints 0→1→2→3→4 (bottom to top)
+// Enemy minions: follow waypoints 4→3→2→1→0 (top to bottom)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function minionAISystem(dt: number) {
@@ -313,20 +269,73 @@ export function minionAISystem(dt: number) {
       Minion.attackTimer[eid] = Math.max(0, Minion.attackTimer[eid] - dt);
     }
 
-    // Find target: nearest enemy (minion, structure, or player)
-    const target = findMinionTarget(eid);
+    const myTeam = Minion.teamId[eid];
+    const mx = Position.x[eid];
+    const my = Position.y[eid];
+    const aggroRange = 120; // aggro range for finding targets
+
+    // ── Step 1: Find nearest enemy target ────────────────────────────
+    let target = -1;
+    let bestDist = aggroRange;
+
+    // Check enemy minions
+    for (let j = 0; j < minions.length; j++) {
+      const tid = minions[j];
+      if (tid === eid) continue;
+      if (Minion.teamId[tid] === myTeam) continue;
+      if (Health.current[tid] <= 0) continue;
+      const dx = Position.x[tid] - mx;
+      const dy = Position.y[tid] - my;
+      const dist = Math.hypot(dx, dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        target = tid;
+      }
+    }
+
+    // Check enemy structures
+    const structures = structureQuery(world);
+    for (let j = 0; j < structures.length; j++) {
+      const tid = structures[j];
+      if (Structure.teamId[tid] === myTeam) continue;
+      if (Health.current[tid] <= 0) continue;
+      const dx = Position.x[tid] - mx;
+      const dy = Position.y[tid] - my;
+      const dist = Math.hypot(dx, dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        target = tid;
+      }
+    }
+
+    // Check enemy player (structures/minions can attack player too)
+    const players = playerQuery(world);
+    for (let j = 0; j < players.length; j++) {
+      const tid = players[j];
+      if (Health.current[tid] <= 0) continue;
+      // Only attack player if on opposite team
+      if (hasComponent(world, Team, tid) && Team.id[tid] === myTeam) continue;
+      const dx = Position.x[tid] - mx;
+      const dy = Position.y[tid] - my;
+      const dist = Math.hypot(dx, dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        target = tid;
+      }
+    }
+
+    // ── Step 2: If target found, attack or move toward it ────────────
     if (target >= 0) {
-      const dx = Position.x[target] - Position.x[eid];
-      const dy = Position.y[target] - Position.y[eid];
+      const dx = Position.x[target] - mx;
+      const dy = Position.y[target] - my;
       const dist = Math.hypot(dx, dy);
 
       if (dist <= Minion.attackRange[eid]) {
-        // In range — attack
+        // In range — stop and attack
         Velocity.x[eid] = 0;
         Velocity.y[eid] = 0;
         if (Minion.attackTimer[eid] <= 0) {
           Minion.attackTimer[eid] = Minion.attackCooldown[eid];
-          // Attack the target
           if (hasComponent(world, Health, target)) {
             Health.current[target] = Math.max(0, Health.current[target] - Minion.damage[eid]);
             spawnDamageNumber(Position.x[target], Position.y[target] - 10, Minion.damage[eid], false);
@@ -335,38 +344,49 @@ export function minionAISystem(dt: number) {
             }
           }
         }
-        continue;
       } else {
-        // Move toward target
+        // Out of range — move toward target
         Velocity.x[eid] = (dx / dist) * Minion.speed[eid];
         Velocity.y[eid] = (dy / dist) * Minion.speed[eid];
-        continue;
       }
+      continue; // Skip waypoint following — we have a target
     }
 
-    // No target — move along lane waypoints
+    // ── Step 3: No target — follow lane waypoints ────────────────────
     const lane = Minion.lane[eid];
     const waypoints = lane === 0 ? matchArena.topLane : matchArena.bottomLane;
-    const wpIdx = Minion.waypointIndex[eid];
+    let wpIdx = Minion.waypointIndex[eid];
 
-    if (wpIdx < waypoints.length) {
-      const wp = waypoints[wpIdx];
-      const wpWorld = tileToWorld(wp.col, wp.row);
-      const dx = wpWorld.x - Position.x[eid];
-      const dy = wpWorld.y - Position.y[eid];
-      const dist = Math.hypot(dx, dy);
+    // Player minions go 0→4, enemy minions go 4→0
+    if (myTeam === 0) {
+      // Player minion — advance forward
+      if (wpIdx >= waypoints.length) wpIdx = waypoints.length - 1;
+    } else {
+      // Enemy minion — advance backward
+      if (wpIdx < 0) wpIdx = 0;
+    }
 
-      if (dist < 20) {
-        // Reached waypoint — move to next
-        Minion.waypointIndex[eid] = wpIdx + 1;
-        // Reverse direction for enemy team (they go the opposite way)
-        if (Minion.teamId[eid] === 1 && Minion.waypointIndex[eid] >= waypoints.length) {
-          Minion.waypointIndex[eid] = 0;
-        }
+    const wp = waypoints[wpIdx];
+    const wpWorld = tileToWorld(wp.col, wp.row);
+    const dx = wpWorld.x - mx;
+    const dy = wpWorld.y - my;
+    const dist = Math.hypot(dx, dy);
+
+    if (dist < 30) {
+      // Reached waypoint — advance to next
+      if (myTeam === 0) {
+        Minion.waypointIndex[eid] = Math.min(wpIdx + 1, waypoints.length - 1);
       } else {
-        Velocity.x[eid] = (dx / dist) * Minion.speed[eid];
-        Velocity.y[eid] = (dy / dist) * Minion.speed[eid];
+        Minion.waypointIndex[eid] = Math.max(wpIdx - 1, 0);
       }
+      // If at the last waypoint, attack the enemy core
+      // (handled by target-finding above since core is a structure)
+    }
+
+    // Move toward current waypoint
+    if (dist > 5) {
+      Velocity.x[eid] = (dx / dist) * Minion.speed[eid];
+      Velocity.y[eid] = (dy / dist) * Minion.speed[eid];
     } else {
       Velocity.x[eid] = 0;
       Velocity.y[eid] = 0;
@@ -374,55 +394,13 @@ export function minionAISystem(dt: number) {
   }
 }
 
-/**
- * Find the nearest enemy target for a minion.
- * Checks minions, structures, and the player.
- */
-function findMinionTarget(minionEid: number): number {
-  const myTeam = Minion.teamId[minionEid];
-  const mx = Position.x[minionEid];
-  const my = Position.y[minionEid];
-  const aggroRange = 150;
-
-  let bestDist = aggroRange;
-  let bestTarget = -1;
-
-  // Check other minions
-  const minions = minionQuery(world);
-  for (let i = 0; i < minions.length; i++) {
-    const tid = minions[i];
-    if (tid === minionEid) continue;
-    if (Minion.teamId[tid] === myTeam) continue;
-    if (Health.current[tid] <= 0) continue;
-    const dx = Position.x[tid] - mx;
-    const dy = Position.y[tid] - my;
-    const dist = Math.hypot(dx, dy);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestTarget = tid;
-    }
-  }
-
-  // Check structures
-  const structures = structureQuery(world);
-  for (let i = 0; i < structures.length; i++) {
-    const tid = structures[i];
-    if (Structure.teamId[tid] === myTeam) continue;
-    if (Health.current[tid] <= 0) continue;
-    const dx = Position.x[tid] - mx;
-    const dy = Position.y[tid] - my;
-    const dist = Math.hypot(dx, dy);
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestTarget = tid;
-    }
-  }
-
-  return bestTarget;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// Structure AI System — towers + cores attack nearby enemies
+// Structure AI System — MOBA-style
+//
+// Towers + cores attack ANY enemy in range:
+//   1. Prioritize the PLAYER if in range (highest threat)
+//   2. Otherwise attack nearest enemy minion
+//   3. If nothing in range, do nothing (wait)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function structureAISystem(dt: number) {
@@ -432,19 +410,44 @@ export function structureAISystem(dt: number) {
     const eid = structures[i];
     if (Health.current[eid] <= 0) continue;
 
-    // Tick attack timer
     if (Structure.attackTimer[eid] > 0) {
       Structure.attackTimer[eid] = Math.max(0, Structure.attackTimer[eid] - dt);
     }
-
     if (Structure.attackTimer[eid] > 0) continue;
 
-    // Find nearest enemy minion in range
     const myTeam = Structure.teamId[eid];
     const sx = Position.x[eid];
     const sy = Position.y[eid];
     const range = Structure.attackRange[eid];
 
+    // ── Priority 1: Attack the player if in range ────────────────────
+    const players = playerQuery(world);
+    let playerTarget = -1;
+    for (let j = 0; j < players.length; j++) {
+      const pid = players[j];
+      if (Health.current[pid] <= 0) continue;
+      // Check if player is on the enemy team
+      if (hasComponent(world, Team, pid) && Team.id[pid] === myTeam) continue;
+      const dx = Position.x[pid] - sx;
+      const dy = Position.y[pid] - sy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < range) {
+        playerTarget = pid;
+        break;
+      }
+    }
+
+    if (playerTarget >= 0) {
+      Structure.attackTimer[eid] = Structure.attackCooldown[eid];
+      Health.current[playerTarget] = Math.max(0, Health.current[playerTarget] - Structure.damage[eid]);
+      spawnDamageNumber(Position.x[playerTarget], Position.y[playerTarget] - 10, Structure.damage[eid], false);
+      if (Health.current[playerTarget] <= 0) {
+        handleDeath(playerTarget);
+      }
+      continue; // Player takes priority
+    }
+
+    // ── Priority 2: Attack nearest enemy minion ──────────────────────
     const minions = minionQuery(world);
     let bestDist = range;
     let bestTarget = -1;
@@ -480,16 +483,10 @@ export function structureAISystem(dt: number) {
 export function cleanupMatchEntities() {
   const minions = minionQuery(world);
   for (let i = 0; i < minions.length; i++) {
-    const eid = minions[i];
-    if (Health.current[eid] <= 0) {
-      removeEntity(world, eid);
-    }
+    if (Health.current[minions[i]] <= 0) removeEntity(world, minions[i]);
   }
   const structures = structureQuery(world);
   for (let i = 0; i < structures.length; i++) {
-    const eid = structures[i];
-    if (Health.current[eid] <= 0) {
-      removeEntity(world, eid);
-    }
+    if (Health.current[structures[i]] <= 0) removeEntity(world, structures[i]);
   }
 }
