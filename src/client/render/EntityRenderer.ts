@@ -33,6 +33,8 @@ import {
   LingeringArea,
   EnemyType,
   EssenceShard,
+  Structure,
+  Minion,
 } from "@core/ecs/world";
 import { ENEMY_TYPES } from "@data/enemies";
 
@@ -183,6 +185,67 @@ function buildEssenceShardSprite(color: number = 0xffb86c): Container {
   return c;
 }
 
+/**
+ * Build a structure sprite (tower or core).
+ * Color comes from the Structure component (passed as elementColor).
+ * Player structures are blue-ish, enemy structures are red-ish.
+ */
+function buildStructureSprite(color: number = 0x808090): Container {
+  const c = new Container();
+  c.label = "Structure";
+
+  const shadow = new Graphics();
+  shadow.ellipse(0, 8, 22, 10);
+  shadow.fill({ color: 0x000000, alpha: 0.5 });
+  c.addChild(shadow);
+
+  const body = new Graphics();
+  // Base
+  body.rect(-18, -8, 36, 16);
+  body.fill({ color });
+  body.stroke({ color: 0x000000, width: 1.5 });
+  // Top (battlement)
+  body.rect(-14, -20, 28, 12);
+  body.fill({ color: (color & 0xfefefe) >> 1 });
+  body.stroke({ color: 0x000000, width: 1 });
+  // Glow on top (team indicator)
+  body.circle(0, -26, 4);
+  body.fill({ color: 0xffffff, alpha: 0.6 });
+  c.addChild(body);
+
+  return c;
+}
+
+/**
+ * Build a minion sprite — small circle with team color.
+ */
+function buildMinionSprite(color: number = 0x60a0ff): Container {
+  const c = new Container();
+  c.label = "Minion";
+
+  const shadow = new Graphics();
+  shadow.ellipse(0, 3, 8, 4);
+  shadow.fill({ color: 0x000000, alpha: 0.4 });
+  c.addChild(shadow);
+
+  const body = new Graphics();
+  // Outer
+  body.circle(0, -2, 8);
+  body.fill({ color });
+  body.stroke({ color: 0x000000, width: 1 });
+  // Inner highlight
+  body.circle(-2, -4, 3);
+  body.fill({ color: 0xffffff, alpha: 0.4 });
+  // Eyes
+  body.circle(-2, -1, 1);
+  body.fill({ color: 0x000000 });
+  body.circle(2, -1, 1);
+  body.fill({ color: 0x000000 });
+  c.addChild(body);
+
+  return c;
+}
+
 function buildHealthBar(width = 32): Graphics {
   const g = new Graphics();
   g.roundRect(-width / 2, 0, width, 4, 1);
@@ -273,6 +336,12 @@ export class EntityRenderer {
       case 7:
         // Devour VFX — drawn dynamically in syncDevourVfx()
         return { display: new Graphics() };
+      case 8:
+        // Structure (tower/core) — drawn with team color
+        return { display: buildStructureSprite(elementColor) };
+      case 9:
+        // Minion — small colored circle
+        return { display: buildMinionSprite(elementColor) };
       default:
         return { display: buildProjectileSprite(elementColor, accentColor) };
     }
@@ -289,12 +358,17 @@ export class EntityRenderer {
       const eid = entities[i];
       const spriteId = Sprite.spriteId[eid];
       const teamId = hasComponent(world, Team, eid) ? Team.id[eid] : -1;
-      const elementColor = hasComponent(world, Projectile, eid)
-        ? Projectile.color[eid]
-        : 0xe0e0e8;
-      const accentColor = hasComponent(world, Projectile, eid)
-        ? Projectile.accentColor[eid]
-        : 0xffffff;
+      // Determine element color based on entity type
+      let elementColor = 0xe0e0e8;
+      let accentColor = 0xffffff;
+      if (hasComponent(world, Projectile, eid)) {
+        elementColor = Projectile.color[eid];
+        accentColor = Projectile.accentColor[eid];
+      } else if (hasComponent(world, Structure, eid)) {
+        elementColor = Structure.color[eid];
+      } else if (hasComponent(world, Minion, eid)) {
+        elementColor = Minion.color[eid];
+      }
 
       if (!this.sprites.has(eid)) {
         const { display, isText } = this.buildDisplayFor(spriteId, elementColor, accentColor, eid);

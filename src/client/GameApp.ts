@@ -65,14 +65,27 @@ import {
   type RunState,
 } from "@core/realm/runState";
 import { defineQuery, hasComponent } from "bitecs";
-import { world, PlayerTag, Health, DevourProgress, EnemyAI } from "@core/ecs/world";
+import { world, PlayerTag, Health, DevourProgress, EnemyAI, MatchState } from "@core/ecs/world";
 import { SanctumUI } from "./ui/SanctumUI";
 import { PrologueUI } from "./ui/PrologueUI";
+import { ModeSelectUI, type GameMode } from "./ui/ModeSelectUI";
 import { playerSkills, rebuildSkillStatsCache } from "@core/ecs/systems/skillSystems";
 import { REALM_INTROS } from "@data/narrative";
+import {
+  startMatch,
+  endMatch,
+  getMatchArena,
+  matchStateSystem,
+  minionAISystem,
+  structureAISystem,
+  cleanupMatchEntities,
+} from "@core/ecs/systems/matchSystems";
+import { DEFAULT_MATCH_CONFIG } from "@data/matchData";
+void DEFAULT_MATCH_CONFIG;
 
 const playerDeathCheckQuery = defineQuery([PlayerTag, Health]);
 const enemyQuery = defineQuery([EnemyAI, Health]);
+const matchStateQuery = defineQuery([MatchState]);
 
 export class GameApp {
   private app: Application;
@@ -99,6 +112,10 @@ export class GameApp {
 
   // Phase 6: Prologue UI
   private prologueUI!: PrologueUI;
+
+  // Phase 7: Mode select + match mode
+  private modeSelectUI!: ModeSelectUI;
+  private gameMode: GameMode = "realm";
 
   constructor() {
     this.app = new Application();
@@ -164,16 +181,12 @@ export class GameApp {
 
     // Phase 6: Initialize Prologue UI (shown on first load)
     this.prologueUI = new PrologueUI(() => {
-      // Show the realm intro notification after prologue completes
-      if (this.currentRealm) {
-        const intro = REALM_INTROS[this.currentRealm.biome];
-        if (intro) {
-          spawnVoiceOfTheWorld(7, 2);
-          console.log(`%c${intro.intro}`, "color: #8888a0; font-style: italic;");
-          console.log(`%c${intro.sageComment}`, "color: #d0a0ff; font-style: italic;");
-        }
-      }
+      // After prologue, show the mode select screen
+      this.modeSelectUI.show();
     });
+
+    // Phase 7: Initialize Mode Select UI
+    this.modeSelectUI = new ModeSelectUI((mode: GameMode) => this.onModeSelected(mode));
 
     // Show prologue on first load (before the game loop starts)
     this.prologueUI.start();
@@ -438,6 +451,107 @@ export class GameApp {
   }
 
   /**
+   * Phase 7: Called when the player selects a game mode.
+   */
+  private onModeSelected(mode: GameMode) {
+    this.gameMode = mode;
+    console.log(`%c[Mode] %cSelected: ${mode}`, "color: #ffb86c; font-weight: bold;", "color: #e0e0e8;");
+
+    if (mode === "realm") {
+      // Enter realm mode — show realm intro
+      if (this.currentRealm) {
+        const intro = REALM_INTROS[this.currentRealm.biome];
+        if (intro) {
+          spawnVoiceOfTheWorld(7, 2);
+          console.log(`%c${intro.intro}`, "color: #8888a0; font-style: italic;");
+          console.log(`%c${intro.sageComment}`, "color: #d0a0ff; font-style: italic;");
+        }
+      }
+    } else if (mode === "match") {
+      // Enter match mode — start the match
+      this.startMatchMode();
+    }
+  }
+
+  /**
+   * Phase 7: Start a match — build arena, spawn player + structures.
+   */
+  private startMatchMode() {
+    // Clear any existing realm entities
+    clearAllEntities();
+
+    // Start the match (builds arena, spawns structures, inits match state)
+    startMatch();
+
+    // Spawn the player at the match arena's player start
+    const arena = getMatchArena();
+    if (!arena) return;
+
+    const startWorld = tileToWorld(arena.playerStart.col, arena.playerStart.row);
+    const pid = spawnPlayerWithSkills(
+      startWorld.x,
+      startWorld.y,
+      this.runState.equippedSkillIndices
+    );
+
+    // Restore DevourProgress
+    addDevourProgressToPlayer(pid);
+    if (hasComponent(world, DevourProgress, pid)) {
+      DevourProgress.unlockedElements[pid] = this.runState.devourProgress.unlockedElements;
+      DevourProgress.unlockedForms[pid] = this.runState.devourProgress.unlockedForms;
+      DevourProgress.unlockedVectors[pid] = this.runState.devourProgress.unlockedVectors;
+      DevourProgress.unlockedModifiers[pid] = this.runState.devourProgress.unlockedModifiers;
+      DevourProgress.totalDevoured[pid] = this.runState.devourProgress.totalDevoured;
+    }
+
+    // Rebuild the tilemap with the match arena
+    if (this.tilemap) {
+      this.worldContainer.removeChild(this.tilemap.container);
+      this.tilemap.container.destroy();
+    }
+
+    // Create a RealmData-compatible object from the match arena
+    const matchRealmData = {
+      name: "Match Arena",
+      biome: "forest",
+      width: arena.width,
+      height: arena.height,
+      tiles: arena.tiles,
+      playerStart: arena.playerStart,
+      enemySpawns: [],
+    };
+    this.tilemap = new IsoTilemap(matchRealmData);
+    this.worldContainer.addChildAt(this.tilemap.container, 0);
+
+    // Update HUD
+    this.hud.setRealmName("Match Arena");
+
+    // Sync skills
+    this.syncOwnedSkillsToRegistry();
+
+    console.log(
+      `%c[Match] %cPlayer spawned at match arena. Destroy the enemy core!`,
+      "color: #ffb86c; font-weight: bold;",
+      "color: #e0e0e8;"
+    );
+  }
+
+  /**
+   * Phase 7: End the match and return to mode select.
+   */
+  private endMatchMode() {
+    endMatch();
+    clearAllEntities();
+    this.gameMode = "realm";
+
+    // Regenerate the realm
+    this.generateAndLoadRealm();
+
+    // Show mode select again
+    this.modeSelectUI.show();
+  }
+
+  /**
    * R key opens the Sanctum at any time (alive or dead).
    * If the player is dead, it triggers the death flow (Sanctum + depth++).
    * If the player is alive, it opens the Sanctum voluntarily (no depth increment,
@@ -513,6 +627,12 @@ export class GameApp {
       return;
     }
 
+    // Phase 7: Pause simulation while the Mode Select is visible
+    if (this.modeSelectUI && this.modeSelectUI.isVisible()) {
+      this.lastTime = performance.now();
+      return;
+    }
+
     // Phase 5: Pause simulation while the Sanctum is open
     if (this.sanctumUI && this.sanctumUI.isVisible()) {
       this.lastTime = performance.now();
@@ -568,8 +688,26 @@ export class GameApp {
     cleanupDeadEntities();
     lifetimeSystem(dt);
 
-    // Phase 6.5: Check if realm is cleared (all enemies dead)
-    this.checkRealmClear();
+    // Phase 7: Match mode systems
+    if (this.gameMode === "match") {
+      matchStateSystem(dt);
+      minionAISystem(dt);
+      structureAISystem(dt);
+      cleanupMatchEntities();
+
+      // Check for match end
+      const matchStates = matchStateQuery(world);
+      if (matchStates.length > 0) {
+        const result = MatchState.result[matchStates[0]];
+        if (result !== 0) {
+          // Match ended — wait a moment then end
+          setTimeout(() => this.endMatchMode(), 3000);
+        }
+      }
+    } else {
+      // Phase 6.5: Check if realm is cleared (all enemies dead)
+      this.checkRealmClear();
+    }
 
     // ── Step 3: Check for player death ─────────────────────────────────
     if (!this.realmTransitioning) {
