@@ -49,8 +49,16 @@ import {
   skillCooldownSystem,
   spawnPlayerWithSkills,
 } from "@core/ecs/systems/skillSystems";
+import {
+  autoDevourSystem,
+  devourSkillSystem,
+  voiceOfTheWorldSystem,
+  addDevourProgressToPlayer,
+  setEnemyType,
+} from "@core/ecs/systems/devourSystems";
 import { tileToWorld } from "@core/iso";
 import { verdantRiftPrototype } from "@data/realms";
+import { ENEMY_TYPES } from "@data/enemies";
 
 export class GameApp {
   private app: Application;
@@ -139,11 +147,21 @@ export class GameApp {
   private spawnRealmEntities() {
     const start = verdantRiftPrototype.playerStart;
     const startWorld = tileToWorld(start.col, start.row);
-    spawnPlayerWithSkills(startWorld.x, startWorld.y);
+    const pid = spawnPlayerWithSkills(startWorld.x, startWorld.y);
 
-    for (const spawn of verdantRiftPrototype.enemySpawns) {
+    // Add DevourProgress to the player (Phase 3)
+    addDevourProgressToPlayer(pid);
+
+    // Spawn enemies with types — cycle through available enemy types
+    // so the player can devour different elements
+    const enemyTypeIds = Object.keys(ENEMY_TYPES).map((k) => parseInt(k, 10));
+    for (let i = 0; i < verdantRiftPrototype.enemySpawns.length; i++) {
+      const spawn = verdantRiftPrototype.enemySpawns[i];
       const w = tileToWorld(spawn.col, spawn.row);
-      spawnEnemy(w.x, w.y);
+      const eid = spawnEnemy(w.x, w.y);
+      // Assign enemy type cyclically
+      const typeId = enemyTypeIds[i % enemyTypeIds.length];
+      setEnemyType(eid, typeId);
     }
   }
 
@@ -190,6 +208,12 @@ export class GameApp {
     }
     this.input.clearCastRequests();
 
+    // Phase 3: Devour skill (E key)
+    const devourRequested = this.input.consumeDevourRequest();
+    if (devourRequested) {
+      devourSkillSystem(dt, { active: true });
+    }
+
     // ── Step 2: simulation systems in dependency order ────────────────
     skillCooldownSystem(dt);
     cooldownSystem(dt);
@@ -204,6 +228,8 @@ export class GameApp {
     statusEffectSystem(dt);
     lingeringAreaSystem(dt);
     growModifierSystem(dt);
+    autoDevourSystem();
+    voiceOfTheWorldSystem(dt);
     cleanupDeadEntities();
     lifetimeSystem(dt);
 

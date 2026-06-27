@@ -20,7 +20,7 @@ async function main() {
     app.start();
     window.__soulforge = app;
     console.log(
-      "%cSoulForge %cPhase 2 — Skill Grammar v1\nDev console: window.__soulforge",
+      "%cSoulForge %cPhase 3 — Devour System\nDev console: window.__soulforge",
       "color: #ffb86c; font-weight: bold; font-size: 14px;",
       "color: #8888a0;"
     );

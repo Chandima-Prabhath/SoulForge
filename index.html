@@ -78,7 +78,7 @@
     <div id="app">
       <div id="loading">Summoning the Sanctum...</div>
       <div id="hud" style="display:none;">
-        <div class="hud-title">SOULFORGE — Phase 2</div>
+        <div class="hud-title">SOULFORGE — Phase 3</div>
         <div class="hud-row"><span class="hud-label">Realm</span><span class="hud-value" id="hud-realm">Verdant Rift (Prototype)</span></div>
         <div class="hud-row"><span class="hud-label">FPS</span><span class="hud-value" id="hud-fps">--</span></div>
         <div class="hud-row"><span class="hud-label">Tile</span><span class="hud-value" id="hud-tile">--, --</span></div>
@@ -127,12 +127,22 @@
           </div>
         </div>
         <div class="hud-row" style="margin-top:6px;"><span class="hud-label">Enemies</span><span class="hud-value" id="hud-enemies">--</span></div>
+        <div style="margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.08);">
+          <div style="font-size:10px; color:#8888a0; letter-spacing:0.05em; margin-bottom:4px;">DEVOUR</div>
+          <div class="hud-row"><span class="hud-value" style="font-size:11px;"><span style="color:#d0a0ff; font-weight:bold;">E</span> [Devour]</span><span class="hud-value" style="font-size:11px;" id="hud-devour-cd">--</span></div>
+          <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
+            <div id="hud-devour-bar" style="width:100%; height:100%; background:#d0a0ff; transition: width 0.05s;"></div>
+          </div>
+          <div class="hud-row" style="margin-top:3px;"><span class="hud-label">Devoured</span><span class="hud-value" id="hud-devour-count">0</span></div>
+          <div id="hud-unlocked" style="margin-top:2px; font-size:10px; color:#8888a0; line-height:1.4;">--</div>
+        </div>
         <div class="hud-help" style="margin-top:6px;">
           WASD: move &nbsp;|&nbsp; L-click: walk<br>
-          R-click: cast slot 1 &nbsp;|&nbsp; 1-4: cast slots<br>
-          R: respawn
+          R-click: slot 1 &nbsp;|&nbsp; 1-4: slots<br>
+          E: [Devour] &nbsp;|&nbsp; R: respawn
         </div>
       </div>
+      <div id="hud-voice" style="position:absolute; top:30px; left:50%; transform:translateX(-50%); background:rgba(10,10,20,0.85); backdrop-filter:blur(8px); padding:8px 20px; border-radius:6px; border:1px solid rgba(255,184,108,0.4); color:#ffb86c; font-size:14px; font-weight:600; letter-spacing:0.03em; pointer-events:none; display:none; text-align:center; min-width:200px;"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -61,6 +61,9 @@ export class InputManager {
   private mouseX = 0;
   private mouseY = 0;
 
+  // Phase 3: Devour skill activation (E key, edge-triggered)
+  private devourRequested = false;
+
   constructor(
     screenToWorldFn: (sx: number, sy: number) => { x: number; y: number }
   ) {
@@ -127,6 +130,16 @@ export class InputManager {
     }
   }
 
+  /**
+   * Consume the pending Devour request (E key). Returns true if Devour was
+   * requested this frame, then clears the flag.
+   */
+  consumeDevourRequest(): boolean {
+    const req = this.devourRequested;
+    this.devourRequested = false;
+    return req;
+  }
+
   private onMouseMove = (e: MouseEvent) => {
     this.mouseX = e.clientX;
     this.mouseY = e.clientY;
@@ -162,6 +175,11 @@ export class InputManager {
           };
         }
       }
+    }
+
+    // E key → activate Devour skill (Phase 3)
+    if (key === "e") {
+      this.devourRequested = true;
     }
   };
 

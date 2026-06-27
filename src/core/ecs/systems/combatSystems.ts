@@ -45,6 +45,7 @@ import {
   EssenceShard,
   StatusEffect,
   LingeringArea,
+  EnemyType,
 } from "../world";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -482,9 +483,15 @@ export function growModifierSystem(dt: number) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function handleDeath(eid: number) {
-  // Drop an essence shard at the death location
+  // Drop an essence shard at the death location.
+  // If the entity has an EnemyType component, pass its typeId to the shard
+  // so the Devour system knows what atoms to drop.
   if (hasComponent(world, Position, eid)) {
-    spawnEssenceShard(Position.x[eid], Position.y[eid], 1);
+    if (hasComponent(world, EnemyType, eid)) {
+      spawnEssenceShard(Position.x[eid], Position.y[eid], 1, EnemyType.typeId[eid]);
+    } else {
+      spawnEssenceShard(Position.x[eid], Position.y[eid], 1, 0);
+    }
   }
 
   // If it's an enemy, mark AI as dead so the AI system can clean it up
@@ -574,7 +581,7 @@ export function damageNumberSystem(dt: number) {
 // Essence Shard spawning — placeholder for Phase 3 (Devour)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function spawnEssenceShard(x: number, y: number, value: number) {
+function spawnEssenceShard(x: number, y: number, value: number, enemyTypeId: number = 0) {
   const eid = addEntity(world);
   addComponent(world, Position, eid);
   addComponent(world, Sprite, eid);
@@ -586,7 +593,9 @@ function spawnEssenceShard(x: number, y: number, value: number) {
   Sprite.spriteId[eid] = 3; // 3 = essence shard
   Sprite.zLayer[eid] = 1;
   EssenceShard.value[eid] = value;
-  Lifetime.remaining[eid] = 8; // disappears after 8s if not devoured
+  EssenceShard.enemyTypeId[eid] = enemyTypeId;
+  EssenceShard.devoured[eid] = 0;
+  Lifetime.remaining[eid] = 12; // 12s to devour before it fades
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

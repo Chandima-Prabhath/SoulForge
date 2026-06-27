@@ -189,6 +189,10 @@ export const DamageNumber = defineComponent({
  */
 export const EssenceShard = defineComponent({
   value: Types.f32,
+  /** Enemy type ID (index into ENEMY_TYPES). Used by Devour system to determine drops. */
+  enemyTypeId: Types.ui8,
+  /** Whether this shard has been devoured (0 = available, 1 = consumed). */
+  devoured: Types.ui8,
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -280,6 +284,54 @@ export const LingeringArea = defineComponent({
   statusDuration: Types.f32,
   statusMagnitude: Types.f32,
   tickAccumulator: Types.f32, // accumulates dt for per-second damage application
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3 — Devour System
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * EnemyType — references the enemy's type definition in ENEMY_TYPES.
+ * Used by the Devour system to determine what atoms to drop on devour.
+ */
+export const EnemyType = defineComponent({
+  typeId: Types.ui8,
+});
+
+/**
+ * DevourProgress — tracks the player's unlocked grammar atoms.
+ * Each field is a bitmask: bit N set = atom ID N is unlocked.
+ * Phase 3: 5 elements (bits 0-4), 3 forms (bits 0-2), 3 vectors (bits 0-2),
+ * 5 modifiers (bits 0-4). Stored as ui32 for headroom.
+ *
+ * Player starts with: Force element, Projectile form, Ranged vector.
+ * Devouring enemies unlocks more atoms based on their devourDrops.
+ */
+export const DevourProgress = defineComponent({
+  unlockedElements: Types.ui32,   // bitmask: bit 0=Force, 1=Fire, 2=Frost, 3=Lightning, 4=Void
+  unlockedForms: Types.ui32,      // bitmask: bit 0=Projectile, 1=Beam, 2=Nova
+  unlockedVectors: Types.ui32,    // bitmask: bit 0=Ranged, 1=Self, 2=Cone
+  unlockedModifiers: Types.ui32,  // bitmask: bit 0=Pierce, 1=Split, 2=Linger, 3=Chain, 4=Grow
+  /** Total essence devoured (for score/progression tracking). */
+  totalDevoured: Types.ui32,
+});
+
+/**
+ * VoiceOfTheWorld — a notification entity. Spawned when something significant
+ * happens (atom unlocked, skill acquired, etc.). The renderer reads these and
+ * shows a transient message. Removed when age > ttl.
+ */
+export const VoiceOfTheWorld = defineComponent({
+  age: Types.f32,
+  ttl: Types.f32,
+  /** Message priority: 0=info, 1=unlock, 2=major. Drives color. */
+  priority: Types.ui8,
+  /** Message text — stored as numeric ID into a message table (Phase 3: simple). */
+  messageId: Types.ui8,
+  /** Optional atom type unlocked (0=none, 1=element, 2=form, 3=vector, 4=modifier). */
+  atomType: Types.ui8,
+  /** Optional atom ID unlocked. */
+  atomId: Types.ui8,
 });
 
 export type World = IWorld;

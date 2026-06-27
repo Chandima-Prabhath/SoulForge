@@ -1,8 +1,9 @@
 /**
  * HUD — DOM-based debug overlay.
  *
- * Phase 2: shows FPS, player tile/pixel coords, realm name, player HP,
- * 4 skill slots with name + cooldown + ready indicator, and enemy count.
+ * Phase 3: shows FPS, player tile/pixel coords, realm name, player HP,
+ * 4 skill slots, Devour cooldown, enemy count, devour progress (unlocked atoms),
+ * and Voice of the World notifications.
  */
 
 import { defineQuery, hasComponent } from "bitecs";
@@ -13,12 +14,18 @@ import {
   Health,
   EnemyAI,
   SkillSlot,
+  Cooldown,
+  DevourProgress,
+  VoiceOfTheWorld,
 } from "@core/ecs/world";
 import { worldToTile } from "@core/iso";
 import { getSkill, getSkillStats } from "@core/ecs/systems/skillSystems";
+import { getDevourProgressSummary } from "@core/ecs/systems/devourSystems";
+import { ELEMENTS, FORMS, VECTORS, MODIFIERS } from "@data/grammar";
 
 const playerQuery = defineQuery([Position, PlayerTag, Health, SkillSlot]);
 const enemyQuery = defineQuery([EnemyAI, Health]);
+const voiceQuery = defineQuery([VoiceOfTheWorld]);
 
 interface SlotEl {
   name: HTMLElement;
@@ -36,6 +43,11 @@ export class HUD {
   private hpBarEl: HTMLElement;
   private enemyEl: HTMLElement;
   private slotEls: SlotEl[] = [];
+  private devourCdEl: HTMLElement;
+  private devourCdBarEl: HTMLElement;
+  private devourCountEl: HTMLElement;
+  private unlockedEl: HTMLElement;
+  private voiceEl: HTMLElement;
 
   private frameCount = 0;
   private fpsAccumulator = 0;
@@ -49,9 +61,13 @@ export class HUD {
     this.hpEl = document.getElementById("hud-hp")!;
     this.hpBarEl = document.getElementById("hud-hp-bar")!;
     this.enemyEl = document.getElementById("hud-enemies")!;
+    this.devourCdEl = document.getElementById("hud-devour-cd")!;
+    this.devourCdBarEl = document.getElementById("hud-devour-bar")!;
+    this.devourCountEl = document.getElementById("hud-devour-count")!;
+    this.unlockedEl = document.getElementById("hud-unlocked")!;
+    this.voiceEl = document.getElementById("hud-voice")!;
     this.realmEl.textContent = `${realmName} (Prototype)`;
 
-    // Cache slot elements
     for (let i = 0; i < 4; i++) {
       this.slotEls.push({
         name: document.getElementById(`hud-slot${i}-name`)!,
@@ -65,7 +81,6 @@ export class HUD {
   }
 
   update(dt: number) {
-    // FPS counter
     this.frameCount++;
     this.fpsAccumulator += dt;
     if (this.fpsAccumulator >= 0.25) {
@@ -84,7 +99,6 @@ export class HUD {
       const { col, row } = worldToTile(px, py);
       this.tileEl.textContent = `${Math.floor(col)}, ${Math.floor(row)}`;
 
-      // HP
       const hp = Math.round(Health.current[eid]);
       const hpMax = Math.round(Health.max[eid]);
       this.hpEl.textContent = `${hp} / ${hpMax}`;
@@ -118,7 +132,6 @@ export class HUD {
           slot.name.textContent = "(empty)";
           slot.cd.textContent = "--";
           (slot.cdBar as HTMLElement).style.width = "0%";
-          slot.key.textContent = String(i + 1);
           continue;
         }
         const skill = getSkill(skillIdx);
@@ -137,16 +150,36 @@ export class HUD {
             (slot.cdBar as HTMLElement).style.background = "#ffb86c";
           }
         }
-        slot.key.textContent = String(i + 1);
+      }
+
+      // Devour cooldown (uses generic Cooldown component)
+      if (hasComponent(world, Cooldown, eid)) {
+        const cd = Cooldown.current[eid];
+        const cdMax = Cooldown.max[eid];
+        if (cd > 0) {
+          this.devourCdEl.textContent = `${cd.toFixed(1)}s`;
+          (this.devourCdBarEl as HTMLElement).style.width = `${(cd / cdMax) * 100}%`;
+          (this.devourCdBarEl as HTMLElement).style.background = "#9040ff";
+        } else {
+          this.devourCdEl.textContent = "Ready";
+          (this.devourCdBarEl as HTMLElement).style.width = "100%";
+          (this.devourCdBarEl as HTMLElement).style.background = "#d0a0ff";
+        }
+      }
+
+      // Devour progress
+      if (hasComponent(world, DevourProgress, eid)) {
+        const summary = getDevourProgressSummary(eid);
+        this.devourCountEl.textContent = String(summary.totalDevoured);
+        this.unlockedEl.textContent =
+          `E: ${summary.elements.join("/") || "—"}  ` +
+          `F: ${summary.forms.join("/") || "—"}  ` +
+          `V: ${summary.vectors.join("/") || "—"}  ` +
+          `M: ${summary.modifiers.join("/") || "—"}`;
       }
     } else {
       this.hpEl.textContent = "DEAD";
       (this.hpBarEl as HTMLElement).style.width = "0%";
-      for (let i = 0; i < 4; i++) {
-        this.slotEls[i].name.textContent = "--";
-        this.slotEls[i].cd.textContent = "--";
-        (this.slotEls[i].cdBar as HTMLElement).style.width = "0%";
-      }
     }
 
     // Enemy count
@@ -156,6 +189,50 @@ export class HUD {
       if (Health.current[enemies[i]] > 0) alive++;
     }
     this.enemyEl.textContent = String(alive);
+
+    // Voice of the World — show the most recent notification
+    const voices = voiceQuery(world);
+    if (voices.length > 0) {
+      // Find the youngest voice (highest age but not expired)
+      let youngest = voices[0];
+      for (let i = 1; i < voices.length; i++) {
+        if (VoiceOfTheWorld.age[voices[i]] < VoiceOfTheWorld.age[youngest]) {
+          youngest = voices[i];
+        }
+      }
+      const msg = this.formatVoiceMessage(youngest);
+      this.voiceEl.textContent = msg;
+      const age = VoiceOfTheWorld.age[youngest];
+      const ttl = VoiceOfTheWorld.ttl[youngest];
+      const fadeT = Math.min(1, age / ttl);
+      this.voiceEl.style.opacity = String(1 - fadeT * fadeT);
+      this.voiceEl.style.display = "block";
+    } else {
+      this.voiceEl.style.display = "none";
+    }
+  }
+
+  private formatVoiceMessage(eid: number): string {
+    const messageId = VoiceOfTheWorld.messageId[eid];
+    const atomType = VoiceOfTheWorld.atomType[eid];
+    const atomId = VoiceOfTheWorld.atomId[eid];
+
+    let atomName = "";
+    if (atomType === 1) atomName = ELEMENTS[atomId as 0 | 1 | 2 | 3 | 4]?.name ?? "";
+    else if (atomType === 2) atomName = FORMS[atomId as 0 | 1 | 2]?.name ?? "";
+    else if (atomType === 3) atomName = VECTORS[atomId as 0 | 1 | 2]?.name ?? "";
+    else if (atomType === 4) atomName = MODIFIERS[atomId as 0 | 1 | 2 | 3 | 4]?.name ?? "";
+
+    switch (messageId) {
+      case 0: return "Essence devoured.";
+      case 1: return `New element unlocked: ${atomName}`;
+      case 2: return `New form unlocked: ${atomName}`;
+      case 3: return `New vector unlocked: ${atomName}`;
+      case 4: return `New modifier unlocked: ${atomName}`;
+      case 5: return "Analysis complete.";
+      case 6: return "[Devour] activated.";
+      default: return "";
+    }
   }
 
   hideLoading() {
@@ -163,6 +240,3 @@ export class HUD {
     if (loading) loading.style.display = "none";
   }
 }
-
-// Suppress unused import warning for hasComponent — kept for future use
-void hasComponent;
