@@ -413,3 +413,63 @@ Files modified:
 - src/client/render/EntityRenderer.ts (colored enemies + shards + Devour VFX)
 - download/soulforge-phase3-devour-vfx-50ms.png
 - download/soulforge-phase3-colored-enemies.png
+
+---
+Task ID: phase-4-roguelite-realms
+Agent: main
+Task: Build Phase 4 — procedural realm generation, 3 biomes, boss enemies, roguelite death loop with DevourProgress persistence.
+
+Work Log:
+- Created src/data/biomes.ts — 3 biomes (forest/cave/void) with tile colors, enemy pools, boss types, stat multipliers, realm sizes, flavor text
+- Created src/core/realm/generator.ts — procedural realm generator:
+  - generateRealm(seed, essenceSalt, runNumber, depth) → GeneratedRealm
+  - Tilemap: border walls, random rock clusters, water pond, diagonal path, boss arena
+  - Enemy spawns: procedural placement with min distance from player + boss arena
+  - Deterministic: same seed → same realm
+  - computeEssenceSalt() from player's devour history (README §5 Layer 1)
+- Created src/core/realm/runState.ts — RunState interface for roguelite meta-progression:
+  - depth, runNumber, baseSeed, devourProgress, hasDied
+  - createNewRunState() + advanceRunOnDeath()
+- Added 3 new enemy types to src/data/enemies.ts:
+  - Treant Boss (type 3): 200 HP, drops Frost+Fire+Nova+Pierce
+  - Void Shade (type 4): 80 HP, drops Void+Grow
+  - Void Titan (type 5, boss): 350 HP, drops Void+Lightning+Beam+Grow+Split
+- Updated IsoTilemap to use biome colors (forest=green, cave=brown, void=purple)
+- Updated GameApp for Phase 4:
+  - Replaced hand-laid realm with generateRealm()
+  - RunState tracks depth + persistent DevourProgress
+  - generateAndLoadRealm() creates new realm from seed
+  - spawnRealmEntities() spawns biome-appropriate enemies + boss
+  - onPlayerDeath() advances run state + generates new realm
+  - R key triggers death loop if player is dead
+  - Registered setPlayerDeathCallback to save DevourProgress BEFORE player removal
+- Updated combatSystems: cleanupDeadEntities now calls playerDeathCallback before removing player
+- Updated HUD: new Voice of the World messages (7='Entering realm', 8='You died'), setRealmName(), updateRunState()
+
+Stage Summary:
+- Procedural realm generation works (deterministic from seed)
+- 3 biomes with distinct visual + gameplay character
+- Boss spawned in arena with extra stats
+- Death loop verified:
+  - Killed enemy → devoured → Fire unlocked (devourCount=1)
+  - Died → DevourProgress saved (console: 'saved: 2 devoured, elements=0b111')
+  - Pressed R → new realm at Depth 2 with 6 enemies
+  - DevourProgress restored: 'E: Force/Fire/Frost' (all 3 elements persisted!)
+- 0 JS errors, production build 334KB (105KB gzipped)
+
+Files produced:
+- NEW: src/data/biomes.ts
+- NEW: src/core/realm/generator.ts
+- NEW: src/core/realm/runState.ts
+- MODIFIED: src/data/enemies.ts (3 new enemy types)
+- MODIFIED: src/client/render/IsoTilemap.ts (biome colors)
+- MODIFIED: src/client/GameApp.ts (roguelite death loop)
+- MODIFIED: src/client/ui/HUD.ts (new messages + run state display)
+- MODIFIED: src/core/ecs/systems/combatSystems.ts (death callback)
+
+Next Phase (Phase 5 — Sanctum Hub):
+- Hub world between realms (Rimuru's village vibes)
+- Skill synthesis UI: combine 2+ skills to create new ones
+- Grimoire: view all discovered skills, name them, share codes
+- Skill crafting: pick atoms → preview → equip to slots
+- NPC dialogue: Voice of the World guide
