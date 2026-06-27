@@ -180,7 +180,9 @@ function spawnMinion(
   Minion.lane[eid] = lane;
   // Player minions start at waypoint 0 (going forward)
   // Enemy minions start at the LAST waypoint (going backward)
-  Minion.waypointIndex[eid] = teamId === 0 ? 0 : 4;
+  // We'll set this after determining the lane in spawnWave, but for now
+  // set to 0 — the minionAISystem will handle direction based on teamId
+  Minion.waypointIndex[eid] = teamId === 0 ? 0 : 99; // 99 = "start from end"
   Minion.color[eid] = teamId === 0 ? TEAM_COLORS.player.minion : TEAM_COLORS.enemy.minion;
   Minion.size[eid] = def.size;
   Minion.minionType[eid] = type === "ranged" ? 1 : 0;
@@ -190,16 +192,18 @@ function spawnWave() {
   if (!matchArena) return;
   const count = DEFAULT_MATCH_CONFIG.minionsPerLane;
 
-  // Player minions spawn at player core, go toward enemy core
-  for (let i = 0; i < count; i++) {
-    spawnMinion(matchArena.playerCore.col + i - 1, matchArena.playerCore.row - 2, 0, 0, i === count - 1 ? "ranged" : "melee");
-    spawnMinion(matchArena.playerCore.col + i - 1, matchArena.playerCore.row - 2, 0, 1, i === count - 1 ? "ranged" : "melee");
+  // Player minions spawn at player core, go toward enemy core (3 lanes: 0=top, 1=mid, 2=bottom)
+  for (let lane = 0; lane < 3; lane++) {
+    for (let i = 0; i < count; i++) {
+      spawnMinion(matchArena.playerCore.col + i - 1, matchArena.playerCore.row - 2, 0, lane, i === count - 1 ? "ranged" : "melee");
+    }
   }
 
   // Enemy minions spawn at enemy core, go toward player core
-  for (let i = 0; i < count; i++) {
-    spawnMinion(matchArena.enemyCore.col + i - 1, matchArena.enemyCore.row + 2, 1, 0, i === count - 1 ? "ranged" : "melee");
-    spawnMinion(matchArena.enemyCore.col + i - 1, matchArena.enemyCore.row + 2, 1, 1, i === count - 1 ? "ranged" : "melee");
+  for (let lane = 0; lane < 3; lane++) {
+    for (let i = 0; i < count; i++) {
+      spawnMinion(matchArena.enemyCore.col + i - 1, matchArena.enemyCore.row + 2, 1, lane, i === count - 1 ? "ranged" : "melee");
+    }
   }
 }
 
@@ -354,10 +358,17 @@ export function minionAISystem(dt: number) {
 
     // ── Step 3: No target — follow lane waypoints ────────────────────
     const lane = Minion.lane[eid];
-    const waypoints = lane === 0 ? matchArena.topLane : matchArena.bottomLane;
+    // Lane 0 = top, 1 = mid, 2 = bottom
+    const waypoints = lane === 0 ? matchArena.topLane : (lane === 1 ? matchArena.midLane : matchArena.bottomLane);
     let wpIdx = Minion.waypointIndex[eid];
 
-    // Player minions go 0→4, enemy minions go 4→0
+    // Fix: if enemy minion has wpIdx=99, set to last waypoint
+    if (wpIdx >= waypoints.length) {
+      wpIdx = waypoints.length - 1;
+      Minion.waypointIndex[eid] = wpIdx;
+    }
+
+    // Player minions go 0→last, enemy minions go last→0
     if (myTeam === 0) {
       // Player minion — advance forward
       if (wpIdx >= waypoints.length) wpIdx = waypoints.length - 1;
