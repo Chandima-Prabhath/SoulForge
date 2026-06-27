@@ -1,9 +1,20 @@
 /**
- * HUD — DOM-based debug overlay.
+ * HUD — Game-style minimal HUD.
  *
- * Phase 3: shows FPS, player tile/pixel coords, realm name, player HP,
- * 4 skill slots, Devour cooldown, enemy count, devour progress (unlocked atoms),
- * and Voice of the World notifications.
+ * Phase 6.5 Redesign: replaced the dashboard-style info panel with a
+ * proper game HUD that doesn't block the view.
+ *
+ * Layout:
+ *   - Top-left: Realm name + depth badge + slim health bar
+ *   - Top-right: Devour count + unlocked atoms (compact)
+ *   - Top-center: Voice of the World (floating text, no box)
+ *   - Bottom-center: Skill bar (4 slots, MOBA-style)
+ *   - Bottom-left: Devour skill button (circular, cooldown ring)
+ *   - Bottom-right: Sanctum button (compact icon)
+ *   - Debug overlay: toggle with F3 (FPS, tile, pos, enemies)
+ *   - Death screen: full overlay when player dies
+ *
+ * Mobile responsive: elements shrink and reposition on small screens.
  */
 
 import { defineQuery, hasComponent } from "bitecs";
@@ -19,7 +30,7 @@ import {
   VoiceOfTheWorld,
 } from "@core/ecs/world";
 import { worldToTile } from "@core/iso";
-import { getSkill, getSkillStats } from "@core/ecs/systems/skillSystems";
+import { getSkill } from "@core/ecs/systems/skillSystems";
 import { getDevourProgressSummary } from "@core/ecs/systems/devourSystems";
 import { ELEMENTS, FORMS, VECTORS, MODIFIERS } from "@data/grammar";
 
@@ -27,60 +38,82 @@ const playerQuery = defineQuery([Position, PlayerTag, Health, SkillSlot]);
 const enemyQuery = defineQuery([EnemyAI, Health]);
 const voiceQuery = defineQuery([VoiceOfTheWorld]);
 
-interface SlotEl {
-  name: HTMLElement;
-  cd: HTMLElement;
-  cdBar: HTMLElement;
-  key: HTMLElement;
-}
-
 export class HUD {
+  // Elements
+  private realmEl: HTMLElement;
+  private depthEl: HTMLElement;
+  private healthFill: HTMLElement;
+  private healthText: HTMLElement;
+  private devourNum: HTMLElement;
+  private unlockedEl: HTMLElement;
+  private voiceEl: HTMLElement;
+  private debugEl: HTMLElement;
+  private deathEl: HTMLElement;
+  private skillSlots: HTMLElement[] = [];
+  private devourBtn: HTMLElement;
+
+  // Debug elements
   private fpsEl: HTMLElement;
   private tileEl: HTMLElement;
   private pixelEl: HTMLElement;
-  private realmEl: HTMLElement;
-  private hpEl: HTMLElement;
-  private hpBarEl: HTMLElement;
-  private enemyEl: HTMLElement;
-  private slotEls: SlotEl[] = [];
-  private devourCdEl: HTMLElement;
-  private devourCdBarEl: HTMLElement;
-  private devourCountEl: HTMLElement;
-  private unlockedEl: HTMLElement;
-  private voiceEl: HTMLElement;
+  private enemiesEl: HTMLElement;
 
+  // State
   private frameCount = 0;
   private fpsAccumulator = 0;
   private fps = 0;
+  private debugVisible = false;
 
   constructor(realmName: string) {
+    this.realmEl = document.getElementById("hud-realm")!;
+    this.depthEl = document.getElementById("hud-depth")!;
+    this.healthFill = document.getElementById("hud-health-fill")!;
+    this.healthText = document.getElementById("hud-health-text")!;
+    this.devourNum = document.getElementById("hud-devour-num")!;
+    this.unlockedEl = document.getElementById("hud-unlocked")!;
+    this.voiceEl = document.getElementById("hud-voice")!;
+    this.debugEl = document.getElementById("hud-debug")!;
+    this.deathEl = document.getElementById("hud-death")!;
+    this.devourBtn = document.getElementById("hud-devour-btn")!;
+
     this.fpsEl = document.getElementById("hud-fps")!;
     this.tileEl = document.getElementById("hud-tile")!;
     this.pixelEl = document.getElementById("hud-pixel")!;
-    this.realmEl = document.getElementById("hud-realm")!;
-    this.hpEl = document.getElementById("hud-hp")!;
-    this.hpBarEl = document.getElementById("hud-hp-bar")!;
-    this.enemyEl = document.getElementById("hud-enemies")!;
-    this.devourCdEl = document.getElementById("hud-devour-cd")!;
-    this.devourCdBarEl = document.getElementById("hud-devour-bar")!;
-    this.devourCountEl = document.getElementById("hud-devour-count")!;
-    this.unlockedEl = document.getElementById("hud-unlocked")!;
-    this.voiceEl = document.getElementById("hud-voice")!;
-    this.realmEl.textContent = `${realmName} (Prototype)`;
+    this.enemiesEl = document.getElementById("hud-enemies")!;
 
+    // Cache skill slot elements
     for (let i = 0; i < 4; i++) {
-      this.slotEls.push({
-        name: document.getElementById(`hud-slot${i}-name`)!,
-        cd: document.getElementById(`hud-slot${i}-cd`)!,
-        cdBar: document.getElementById(`hud-slot${i}-bar`)!,
-        key: document.getElementById(`hud-slot${i}-key`)!,
-      });
+      const slot = document.getElementById(`skill-slot-${i}`);
+      if (slot) this.skillSlots.push(slot);
     }
 
-    document.getElementById("hud")!.style.display = "block";
+    // Show all HUD elements
+    this.realmEl.textContent = realmName;
+    this.showHudElements();
+
+    // F3 to toggle debug
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "F3") {
+        e.preventDefault();
+        this.debugVisible = !this.debugVisible;
+        this.debugEl.style.display = this.debugVisible ? "block" : "none";
+      }
+    });
+  }
+
+  private showHudElements() {
+    const ids = [
+      "hud-topleft", "hud-topright", "hud-skillbar",
+      "hud-devour-btn", "hud-sanctum-btn"
+    ];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = el.style.display === "none" ? "flex" : el.style.display;
+    }
   }
 
   update(dt: number) {
+    // FPS counter
     this.frameCount++;
     this.fpsAccumulator += dt;
     if (this.fpsAccumulator >= 0.25) {
@@ -93,17 +126,16 @@ export class HUD {
     const players = playerQuery(world);
     if (players.length > 0) {
       const eid = players[0];
-      const px = Position.x[eid];
-      const py = Position.y[eid];
-      this.pixelEl.textContent = `${Math.round(px)}, ${Math.round(py)}`;
-      const { col, row } = worldToTile(px, py);
-      this.tileEl.textContent = `${Math.floor(col)}, ${Math.floor(row)}`;
 
+      // Health
       const hp = Math.round(Health.current[eid]);
       const hpMax = Math.round(Health.max[eid]);
-      this.hpEl.textContent = `${hp} / ${hpMax}`;
       const hpRatio = Math.max(0, Math.min(1, hp / hpMax));
-      (this.hpBarEl as HTMLElement).style.width = `${hpRatio * 100}%`;
+      this.healthFill.style.width = `${hpRatio * 100}%`;
+      this.healthText.textContent = `${hp}/${hpMax}`;
+
+      // Hide death screen
+      this.deathEl.style.display = "none";
 
       // Skill slots
       const skillIndices = [
@@ -126,60 +158,106 @@ export class HUD {
       ];
 
       for (let i = 0; i < 4; i++) {
-        const slot = this.slotEls[i];
+        const slot = this.skillSlots[i];
+        if (!slot) continue;
+
         const skillIdx = skillIndices[i];
+        const cd = cds[i];
+        const cdMax = cdMaxes[i];
+
         if (skillIdx < 0) {
-          slot.name.textContent = "(empty)";
-          slot.cd.textContent = "--";
-          (slot.cdBar as HTMLElement).style.width = "0%";
+          slot.classList.add("empty");
+          slot.classList.remove("ready");
+          const nameEl = slot.querySelector(".skill-name") as HTMLElement;
+          if (nameEl) nameEl.textContent = "—";
+          const cdOverlay = slot.querySelector(".cooldown-overlay") as HTMLElement;
+          if (cdOverlay) cdOverlay.style.height = "0%";
+          const cdText = slot.querySelector(".cooldown-text") as HTMLElement;
+          if (cdText) cdText.style.display = "none";
           continue;
         }
+
+        slot.classList.remove("empty");
         const skill = getSkill(skillIdx);
-        const stats = getSkillStats(skillIdx);
-        if (skill && stats) {
-          slot.name.textContent = skill.name;
-          const cd = cds[i];
-          const cdMax = cdMaxes[i];
-          if (cd > 0) {
-            slot.cd.textContent = `${cd.toFixed(2)}s`;
-            (slot.cdBar as HTMLElement).style.width = `${(cd / cdMax) * 100}%`;
-            (slot.cdBar as HTMLElement).style.background = "#6666a0";
-          } else {
-            slot.cd.textContent = "Ready";
-            (slot.cdBar as HTMLElement).style.width = "100%";
-            (slot.cdBar as HTMLElement).style.background = "#ffb86c";
+        if (skill) {
+          const nameEl = slot.querySelector(".skill-name") as HTMLElement;
+          if (nameEl) nameEl.textContent = skill.name;
+
+          // Set icon based on element
+          const iconEl = slot.querySelector(".skill-icon") as HTMLElement;
+          if (iconEl) {
+            const elementColors = ["✦", "🔥", "❄", "⚡", "🕳"];
+            iconEl.textContent = elementColors[skill.element] || "✦";
           }
+        }
+
+        const cdOverlay = slot.querySelector(".cooldown-overlay") as HTMLElement;
+        const cdText = slot.querySelector(".cooldown-text") as HTMLElement;
+
+        if (cd > 0) {
+          slot.classList.remove("ready");
+          if (cdOverlay) {
+            const cdRatio = cd / cdMax;
+            cdOverlay.style.height = `${cdRatio * 100}%`;
+          }
+          if (cdText) {
+            cdText.textContent = cd > 1 ? Math.ceil(cd).toString() : cd.toFixed(1);
+            cdText.style.display = "block";
+          }
+        } else {
+          slot.classList.add("ready");
+          if (cdOverlay) cdOverlay.style.height = "0%";
+          if (cdText) cdText.style.display = "none";
         }
       }
 
-      // Devour cooldown (uses generic Cooldown component)
+      // Devour cooldown
       if (hasComponent(world, Cooldown, eid)) {
         const cd = Cooldown.current[eid];
         const cdMax = Cooldown.max[eid];
+        const cdOverlay = this.devourBtn.querySelector(".cooldown-overlay") as HTMLElement;
+        const cdText = this.devourBtn.querySelector(".cooldown-text") as HTMLElement;
+
         if (cd > 0) {
-          this.devourCdEl.textContent = `${cd.toFixed(1)}s`;
-          (this.devourCdBarEl as HTMLElement).style.width = `${(cd / cdMax) * 100}%`;
-          (this.devourCdBarEl as HTMLElement).style.background = "#9040ff";
+          if (cdOverlay) {
+            const cdRatio = cd / cdMax;
+            cdOverlay.style.height = `${cdRatio * 100}%`;
+          }
+          if (cdText) {
+            cdText.textContent = cd > 1 ? Math.ceil(cd).toString() : cd.toFixed(1);
+            cdText.style.display = "block";
+          }
+          this.devourBtn.style.borderColor = "rgba(208,160,255,0.2)";
         } else {
-          this.devourCdEl.textContent = "Ready";
-          (this.devourCdBarEl as HTMLElement).style.width = "100%";
-          (this.devourCdBarEl as HTMLElement).style.background = "#d0a0ff";
+          if (cdOverlay) cdOverlay.style.height = "0%";
+          if (cdText) cdText.style.display = "none";
+          this.devourBtn.style.borderColor = "rgba(208,160,255,0.6)";
         }
       }
 
       // Devour progress
       if (hasComponent(world, DevourProgress, eid)) {
         const summary = getDevourProgressSummary(eid);
-        this.devourCountEl.textContent = String(summary.totalDevoured);
-        this.unlockedEl.textContent =
+        this.devourNum.textContent = String(summary.totalDevoured);
+        const unlockedStr =
           `E: ${summary.elements.join("/") || "—"}  ` +
           `F: ${summary.forms.join("/") || "—"}  ` +
-          `V: ${summary.vectors.join("/") || "—"}  ` +
-          `M: ${summary.modifiers.join("/") || "—"}`;
+          `V: ${summary.vectors.join("/") || "—"}` +
+          (summary.modifiers.length > 0 ? `  M: ${summary.modifiers.join("/")}` : "");
+        this.unlockedEl.textContent = unlockedStr;
       }
+
+      // Debug info
+      const px = Position.x[eid];
+      const py = Position.y[eid];
+      this.pixelEl.textContent = `${Math.round(px)}, ${Math.round(py)}`;
+      const { col, row } = worldToTile(px, py);
+      this.tileEl.textContent = `${Math.floor(col)}, ${Math.floor(row)}`;
     } else {
-      this.hpEl.textContent = "DEAD";
-      (this.hpBarEl as HTMLElement).style.width = "0%";
+      // Player is dead — show death screen
+      this.deathEl.style.display = "flex";
+      this.healthFill.style.width = "0%";
+      this.healthText.textContent = "0/0";
     }
 
     // Enemy count
@@ -188,12 +266,11 @@ export class HUD {
     for (let i = 0; i < enemies.length; i++) {
       if (Health.current[enemies[i]] > 0) alive++;
     }
-    this.enemyEl.textContent = String(alive);
+    this.enemiesEl.textContent = String(alive);
 
-    // Voice of the World — show the most recent notification
+    // Voice of the World
     const voices = voiceQuery(world);
     if (voices.length > 0) {
-      // Find the youngest voice (highest age but not expired)
       let youngest = voices[0];
       for (let i = 1; i < voices.length; i++) {
         if (VoiceOfTheWorld.age[voices[i]] < VoiceOfTheWorld.age[youngest]) {
@@ -225,37 +302,25 @@ export class HUD {
 
     switch (messageId) {
       case 0: return "Essence devoured.";
-      case 1: return `New element unlocked: ${atomName}`;
-      case 2: return `New form unlocked: ${atomName}`;
-      case 3: return `New vector unlocked: ${atomName}`;
-      case 4: return `New modifier unlocked: ${atomName}`;
+      case 1: return `✦ ${atomName} element unlocked`;
+      case 2: return `✦ ${atomName} form unlocked`;
+      case 3: return `✦ ${atomName} vector unlocked`;
+      case 4: return `✦ ${atomName} modifier unlocked`;
       case 5: return "Analysis complete.";
-      case 6: return "[Devour] activated.";
+      case 6: return "[Devour] activated";
       case 7: return "Entering a new realm...";
-      case 8: return "You died. Press R to descend.";
-      case 9: return "✦ Realm Cleared! Press R to descend. ✦";
+      case 8: return "You died.";
+      case 9: return "✦ Realm Cleared! Press R to descend ✦";
       default: return "";
     }
   }
 
-  /**
-   * Set the realm name displayed in the HUD (called on realm transition).
-   */
   setRealmName(name: string) {
-    this.realmEl.textContent = `${name} (Depth varies)`;
+    this.realmEl.textContent = name;
   }
 
-  /**
-   * Update the HUD with run state info (depth, total devoured).
-   */
-  updateRunState(depth: number, totalDevoured: number) {
-    // Update the realm display to show depth
-    if (this.realmEl.textContent && !this.realmEl.textContent.includes("Depth")) {
-      this.realmEl.textContent = this.realmEl.textContent.replace(" (Prototype)", "");
-    }
-    // Could add a separate depth display here in the future
-    void depth;
-    void totalDevoured;
+  updateRunState(depth: number, _totalDevoured: number) {
+    this.depthEl.textContent = String(depth);
   }
 
   hideLoading() {

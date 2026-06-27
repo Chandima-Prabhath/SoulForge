@@ -13,6 +13,7 @@
         background: #0a0a0f;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: #e8e8f0;
+        -webkit-tap-highlight-color: transparent;
       }
       #app {
         position: relative;
@@ -23,46 +24,368 @@
         display: block;
         touch-action: none;
       }
-      #hud {
+
+      /* ═══════════════════════════════════════════════════════════════
+         GAME HUD — minimal, non-blocking, game-style
+         ═══════════════════════════════════════════════════════════════ */
+
+      /* All HUD elements: no pointer events by default, no text selection */
+      .hud-element {
         position: absolute;
-        top: 12px;
-        left: 12px;
-        background: rgba(10, 10, 20, 0.65);
-        backdrop-filter: blur(8px);
-        padding: 10px 14px;
-        border-radius: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        font-size: 12px;
-        line-height: 1.6;
-        font-family: "SF Mono", "Monaco", "Consolas", monospace;
         pointer-events: none;
         user-select: none;
-        min-width: 220px;
+        z-index: 100;
       }
-      #hud .hud-title {
+
+      /* ── Top-Left: Health Bar + Realm Info ────────────────────────── */
+      #hud-topleft {
+        top: 16px;
+        left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      #hud-realm-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
         color: #ffb86c;
         font-weight: 600;
-        margin-bottom: 4px;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.8);
       }
-      #hud .hud-row {
+
+      #hud-realm-info .depth-badge {
+        background: rgba(255,184,108,0.2);
+        border: 1px solid rgba(255,184,108,0.4);
+        border-radius: 4px;
+        padding: 2px 8px;
+        font-size: 11px;
+      }
+
+      #hud-health-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      #hud-health-bar {
+        width: 180px;
+        height: 14px;
+        background: rgba(0,0,0,0.6);
+        border: 1px solid rgba(255,255,255,0.15);
+        border-radius: 7px;
+        overflow: hidden;
+        position: relative;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      }
+
+      #hud-health-fill {
+        height: 100%;
+        background: linear-gradient(90deg, #ff2040 0%, #ff6080 50%, #40ff80 100%);
+        background-size: 200% 100%;
+        background-position: 100% 0;
+        transition: width 0.2s ease, background-position 0.2s ease;
+        border-radius: 6px;
+      }
+
+      #hud-health-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 10px;
+        font-weight: 700;
+        color: #fff;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+        font-family: "SF Mono", monospace;
+      }
+
+      /* ── Top-Right: Devour Progress (compact) ─────────────────────── */
+      #hud-topright {
+        top: 16px;
+        right: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 4px;
+      }
+
+      #hud-devour-count {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #d0a0ff;
+        font-weight: 600;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      }
+
+      #hud-devour-count .devour-icon {
+        font-size: 14px;
+      }
+
+      #hud-unlocked {
+        font-size: 10px;
+        color: rgba(200,200,220,0.6);
+        text-align: right;
+        line-height: 1.4;
+        text-shadow: 0 1px 4px rgba(0,0,0,0.8);
+        max-width: 200px;
+      }
+
+      /* ── Top-Center: Voice of the World (floating text, no box) ───── */
+      #hud-voice {
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #ffb86c;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-align: center;
+        text-shadow: 0 2px 12px rgba(0,0,0,0.9), 0 0 20px rgba(255,184,108,0.3);
+        display: none;
+        transition: opacity 0.5s ease;
+        max-width: 80vw;
+      }
+
+      /* ── Bottom-Center: Skill Bar (like MOBA games) ───────────────── */
+      #hud-skillbar {
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 8px;
+        align-items: flex-end;
+      }
+
+      .skill-slot {
+        width: 56px;
+        height: 56px;
+        background: rgba(10,10,20,0.7);
+        border: 2px solid rgba(255,255,255,0.15);
+        border-radius: 10px;
+        position: relative;
+        overflow: hidden;
+        backdrop-filter: blur(4px);
+        transition: border-color 0.15s, transform 0.1s;
+      }
+
+      .skill-slot.ready {
+        border-color: rgba(255,184,108,0.5);
+      }
+
+      .skill-slot.empty {
+        opacity: 0.3;
+        border-style: dashed;
+      }
+
+      .skill-slot .skill-icon {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 24px;
+        opacity: 0.9;
+      }
+
+      .skill-slot .skill-key {
+        position: absolute;
+        top: 2px;
+        left: 4px;
+        font-size: 10px;
+        font-weight: 700;
+        color: #ffb86c;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+        font-family: "SF Mono", monospace;
+      }
+
+      .skill-slot .skill-name {
+        position: absolute;
+        bottom: 2px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 8px;
+        color: rgba(255,255,255,0.7);
+        text-align: center;
+        white-space: nowrap;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+        max-width: 52px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .skill-slot .cooldown-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: rgba(0,0,0,0.7);
+        transition: height 0.05s linear;
+        pointer-events: none;
+      }
+
+      .skill-slot .cooldown-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 16px;
+        font-weight: 700;
+        color: #fff;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+        font-family: "SF Mono", monospace;
+        display: none;
+      }
+
+      /* ── Bottom-Left: Devour Skill Button ─────────────────────────── */
+      #hud-devour-btn {
+        bottom: 20px;
+        left: 20px;
+        width: 64px;
+        height: 64px;
+        background: rgba(40,20,60,0.7);
+        border: 2px solid rgba(208,160,255,0.4);
+        border-radius: 50%;
+        position: absolute;
+        overflow: hidden;
+        backdrop-filter: blur(4px);
+        pointer-events: none;
+      }
+
+      #hud-devour-btn .devour-icon {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 28px;
+        color: #d0a0ff;
+        text-shadow: 0 0 10px rgba(208,160,255,0.5);
+      }
+
+      #hud-devour-btn .devour-key {
+        position: absolute;
+        top: 4px;
+        right: 6px;
+        font-size: 10px;
+        font-weight: 700;
+        color: #d0a0ff;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+        font-family: "SF Mono", monospace;
+      }
+
+      #hud-devour-btn .cooldown-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: rgba(0,0,0,0.7);
+        transition: height 0.05s linear;
+      }
+
+      #hud-devour-btn .cooldown-text {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 18px;
+        font-weight: 700;
+        color: #fff;
+        text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+        font-family: "SF Mono", monospace;
+        display: none;
+      }
+
+      /* ── Bottom-Right: Sanctum Button ─────────────────────────────── */
+      #hud-sanctum-btn {
+        bottom: 20px;
+        right: 20px;
+        width: 48px;
+        height: 48px;
+        background: rgba(40,40,55,0.7);
+        border: 1px solid rgba(255,184,108,0.3);
+        border-radius: 8px;
+        position: absolute;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        color: #ffb86c;
+        backdrop-filter: blur(4px);
+        pointer-events: none;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+      }
+
+      #hud-sanctum-btn .sanctum-key {
+        position: absolute;
+        top: 2px;
+        right: 4px;
+        font-size: 9px;
+        color: #ffb86c;
+        font-family: "SF Mono", monospace;
+        font-weight: 700;
+      }
+
+      /* ── Debug Overlay (toggle with F3) ───────────────────────────── */
+      #hud-debug {
+        top: 50px;
+        left: 16px;
+        background: rgba(0,0,0,0.7);
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 10px;
+        font-family: "SF Mono", monospace;
+        color: #88ff88;
+        line-height: 1.6;
+        display: none;
+        border: 1px solid rgba(136,255,136,0.2);
+      }
+
+      #hud-debug .debug-row {
         display: flex;
         justify-content: space-between;
         gap: 12px;
       }
-      #hud .hud-label {
+
+      #hud-debug .debug-label {
         color: #8888a0;
       }
-      #hud .hud-value {
-        color: #f8f8ff;
+
+      /* ── Death Screen ─────────────────────────────────────────────── */
+      #hud-death {
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: radial-gradient(ellipse at center, rgba(40,0,0,0.7) 0%, rgba(0,0,0,0.9) 100%);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        z-index: 200;
       }
-      #hud .hud-help {
-        margin-top: 6px;
-        padding-top: 6px;
-        border-top: 1px solid rgba(255,255,255,0.08);
+
+      #hud-death .death-text {
+        font-size: 48px;
+        color: #ff4040;
+        font-weight: bold;
+        letter-spacing: 0.2em;
+        text-shadow: 0 0 30px rgba(255,64,64,0.5);
+        margin-bottom: 16px;
+      }
+
+      #hud-death .death-hint {
+        font-size: 16px;
         color: #8888a0;
-        font-size: 11px;
+        letter-spacing: 0.1em;
       }
+
+      #hud-death .death-hint .key {
+        color: #ffb86c;
+        font-weight: bold;
+      }
+
+      /* ── Loading ──────────────────────────────────────────────────── */
       #loading {
         position: absolute;
         top: 50%;
@@ -72,77 +395,152 @@
         font-size: 14px;
         letter-spacing: 0.1em;
       }
+
+      /* ── Mobile Responsive ────────────────────────────────────────── */
+      @media (max-width: 768px) {
+        #hud-topleft {
+          top: 10px;
+          left: 10px;
+        }
+        #hud-health-bar {
+          width: 120px;
+          height: 12px;
+        }
+        #hud-topright {
+          top: 10px;
+          right: 10px;
+        }
+        #hud-unlocked {
+          max-width: 140px;
+          font-size: 9px;
+        }
+        #hud-skillbar {
+          bottom: 14px;
+          gap: 6px;
+        }
+        .skill-slot {
+          width: 48px;
+          height: 48px;
+        }
+        .skill-slot .skill-icon {
+          font-size: 20px;
+        }
+        .skill-slot .skill-name {
+          font-size: 7px;
+          max-width: 44px;
+        }
+        #hud-devour-btn {
+          bottom: 14px;
+          left: 14px;
+          width: 52px;
+          height: 52px;
+        }
+        #hud-devour-btn .devour-icon {
+          font-size: 24px;
+        }
+        #hud-sanctum-btn {
+          bottom: 14px;
+          right: 14px;
+          width: 40px;
+          height: 40px;
+          font-size: 18px;
+        }
+        #hud-voice {
+          font-size: 13px;
+          top: 50px;
+        }
+      }
     </style>
   </head>
   <body>
     <div id="app">
       <div id="loading">Summoning the Sanctum...</div>
-      <div id="hud" style="display:none;">
-        <div class="hud-title">SOULFORGE — Phase 3</div>
-        <div class="hud-row"><span class="hud-label">Realm</span><span class="hud-value" id="hud-realm">Verdant Rift (Prototype)</span></div>
-        <div class="hud-row"><span class="hud-label">FPS</span><span class="hud-value" id="hud-fps">--</span></div>
-        <div class="hud-row"><span class="hud-label">Tile</span><span class="hud-value" id="hud-tile">--, --</span></div>
-        <div class="hud-row"><span class="hud-label">Pixel</span><span class="hud-value" id="hud-pixel">--, --</span></div>
-        <div class="hud-row"><span class="hud-label">HP</span><span class="hud-value" id="hud-hp">--</span></div>
-        <div style="margin-top:2px; width:100%; height:6px; background:#222230; border-radius:3px; overflow:hidden;">
-          <div id="hud-hp-bar" style="width:100%; height:100%; background:#40ff40; transition: width 0.15s;"></div>
+
+      <!-- Top-Left: Health + Realm -->
+      <div id="hud-topleft" class="hud-element" style="display:none;">
+        <div id="hud-realm-info">
+          <span class="depth-badge">D<span id="hud-depth">1</span></span>
+          <span id="hud-realm">Verdant Rift</span>
         </div>
-        <div style="margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.08);">
-          <div style="font-size:10px; color:#8888a0; letter-spacing:0.05em; margin-bottom:4px;">SKILLS</div>
-          <div id="hud-slot0" style="margin-bottom:4px;">
-            <div class="hud-row">
-              <span class="hud-value" style="font-size:11px;"><span id="hud-slot0-key" style="color:#ffb86c; font-weight:bold;">1</span> <span id="hud-slot0-name">--</span></span>
-              <span class="hud-value" style="font-size:11px;" id="hud-slot0-cd">--</span>
-            </div>
-            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
-              <div id="hud-slot0-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
-            </div>
+        <div id="hud-health-container">
+          <div id="hud-health-bar">
+            <div id="hud-health-fill" style="width:100%;"></div>
+            <div id="hud-health-text">100/100</div>
           </div>
-          <div id="hud-slot1" style="margin-bottom:4px;">
-            <div class="hud-row">
-              <span class="hud-value" style="font-size:11px;"><span id="hud-slot1-key" style="color:#ffb86c; font-weight:bold;">2</span> <span id="hud-slot1-name">--</span></span>
-              <span class="hud-value" style="font-size:11px;" id="hud-slot1-cd">--</span>
-            </div>
-            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
-              <div id="hud-slot1-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
-            </div>
-          </div>
-          <div id="hud-slot2" style="margin-bottom:4px;">
-            <div class="hud-row">
-              <span class="hud-value" style="font-size:11px;"><span id="hud-slot2-key" style="color:#ffb86c; font-weight:bold;">3</span> <span id="hud-slot2-name">--</span></span>
-              <span class="hud-value" style="font-size:11px;" id="hud-slot2-cd">--</span>
-            </div>
-            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
-              <div id="hud-slot2-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
-            </div>
-          </div>
-          <div id="hud-slot3" style="margin-bottom:4px;">
-            <div class="hud-row">
-              <span class="hud-value" style="font-size:11px;"><span id="hud-slot3-key" style="color:#ffb86c; font-weight:bold;">4</span> <span id="hud-slot3-name">--</span></span>
-              <span class="hud-value" style="font-size:11px;" id="hud-slot3-cd">--</span>
-            </div>
-            <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
-              <div id="hud-slot3-bar" style="width:100%; height:100%; background:#ffb86c; transition: width 0.05s;"></div>
-            </div>
-          </div>
-        </div>
-        <div class="hud-row" style="margin-top:6px;"><span class="hud-label">Enemies</span><span class="hud-value" id="hud-enemies">--</span></div>
-        <div style="margin-top:8px; padding-top:6px; border-top:1px solid rgba(255,255,255,0.08);">
-          <div style="font-size:10px; color:#8888a0; letter-spacing:0.05em; margin-bottom:4px;">DEVOUR</div>
-          <div class="hud-row"><span class="hud-value" style="font-size:11px;"><span style="color:#d0a0ff; font-weight:bold;">E</span> [Devour]</span><span class="hud-value" style="font-size:11px;" id="hud-devour-cd">--</span></div>
-          <div style="margin-top:1px; width:100%; height:3px; background:#222230; border-radius:2px; overflow:hidden;">
-            <div id="hud-devour-bar" style="width:100%; height:100%; background:#d0a0ff; transition: width 0.05s;"></div>
-          </div>
-          <div class="hud-row" style="margin-top:3px;"><span class="hud-label">Devoured</span><span class="hud-value" id="hud-devour-count">0</span></div>
-          <div id="hud-unlocked" style="margin-top:2px; font-size:10px; color:#8888a0; line-height:1.4;">--</div>
-        </div>
-        <div class="hud-help" style="margin-top:6px;">
-          WASD: move &nbsp;|&nbsp; L-click: walk<br>
-          R-click: slot 1 &nbsp;|&nbsp; 1-4: slots<br>
-          E: [Devour] &nbsp;|&nbsp; R: Sanctum
         </div>
       </div>
-      <div id="hud-voice" style="position:absolute; top:30px; left:50%; transform:translateX(-50%); background:rgba(10,10,20,0.85); backdrop-filter:blur(8px); padding:8px 20px; border-radius:6px; border:1px solid rgba(255,184,108,0.4); color:#ffb86c; font-size:14px; font-weight:600; letter-spacing:0.03em; pointer-events:none; display:none; text-align:center; min-width:200px;"></div>
+
+      <!-- Top-Right: Devour Progress -->
+      <div id="hud-topright" class="hud-element" style="display:none;">
+        <div id="hud-devour-count">
+          <span class="devour-icon">✦</span>
+          <span id="hud-devour-num">0</span> devoured
+        </div>
+        <div id="hud-unlocked">Force / Projectile / Ranged</div>
+      </div>
+
+      <!-- Top-Center: Voice of the World -->
+      <div id="hud-voice" class="hud-element"></div>
+
+      <!-- Debug Overlay (F3) -->
+      <div id="hud-debug" class="hud-element">
+        <div class="debug-row"><span class="debug-label">FPS</span><span id="hud-fps">--</span></div>
+        <div class="debug-row"><span class="debug-label">Tile</span><span id="hud-tile">--, --</span></div>
+        <div class="debug-row"><span class="debug-label">Pos</span><span id="hud-pixel">--, --</span></div>
+        <div class="debug-row"><span class="debug-label">Enemies</span><span id="hud-enemies">--</span></div>
+      </div>
+
+      <!-- Bottom-Center: Skill Bar -->
+      <div id="hud-skillbar" class="hud-element" style="display:none;">
+        <div class="skill-slot" id="skill-slot-0">
+          <span class="skill-key">1</span>
+          <span class="skill-icon">✦</span>
+          <span class="skill-name">--</span>
+          <div class="cooldown-overlay" style="height:0%;"></div>
+          <span class="cooldown-text"></span>
+        </div>
+        <div class="skill-slot" id="skill-slot-1">
+          <span class="skill-key">2</span>
+          <span class="skill-icon">✦</span>
+          <span class="skill-name">--</span>
+          <div class="cooldown-overlay" style="height:0%;"></div>
+          <span class="cooldown-text"></span>
+        </div>
+        <div class="skill-slot" id="skill-slot-2">
+          <span class="skill-key">3</span>
+          <span class="skill-icon">✦</span>
+          <span class="skill-name">--</span>
+          <div class="cooldown-overlay" style="height:0%;"></div>
+          <span class="cooldown-text"></span>
+        </div>
+        <div class="skill-slot" id="skill-slot-3">
+          <span class="skill-key">4</span>
+          <span class="skill-icon">✦</span>
+          <span class="skill-name">--</span>
+          <div class="cooldown-overlay" style="height:0%;"></div>
+          <span class="cooldown-text"></span>
+        </div>
+      </div>
+
+      <!-- Bottom-Left: Devour Button -->
+      <div id="hud-devour-btn" class="hud-element" style="display:none;">
+        <span class="devour-icon">🌀</span>
+        <span class="devour-key">E</span>
+        <div class="cooldown-overlay" style="height:0%;"></div>
+        <span class="cooldown-text"></span>
+      </div>
+
+      <!-- Bottom-Right: Sanctum Button -->
+      <div id="hud-sanctum-btn" class="hud-element" style="display:none;">
+        🏛
+        <span class="sanctum-key">R</span>
+      </div>
+
+      <!-- Death Screen -->
+      <div id="hud-death" class="hud-element">
+        <div class="death-text">YOU DIED</div>
+        <div class="death-hint">Press <span class="key">R</span> to enter the Sanctum</div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
